@@ -178,6 +178,17 @@ def api_system():
     except Exception:
         stats["temp_c"] = None
 
+    try:
+        sv = os.statvfs(DB_PATH)
+        total_kb = sv.f_blocks * sv.f_frsize // 1024
+        free_kb  = sv.f_bavail * sv.f_frsize // 1024
+        used_kb  = total_kb - free_kb
+        stats["disk_used_gb"]  = round(used_kb  / 1_048_576, 1)
+        stats["disk_total_gb"] = round(total_kb / 1_048_576, 1)
+        stats["disk_percent"]  = round(used_kb / total_kb * 100, 1) if total_kb else 0
+    except Exception:
+        stats["disk_used_gb"] = stats["disk_total_gb"] = stats["disk_percent"] = None
+
     return jsonify(stats)
 
 

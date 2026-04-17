@@ -12,6 +12,7 @@ import sys
 import time
 import signal
 import logging
+import logging.handlers
 import sqlite3
 import hashlib
 import asyncio
@@ -37,14 +38,23 @@ MONITOR_MODE      = os.getenv("MONITOR_MODE", "continuous")
 LOG_LEVEL         = os.getenv("LOG_LEVEL", "INFO")
 
 # ── Logging ────────────────────────────────────────────────────────────────────
+class _HourlyPurgeHandler(logging.handlers.TimedRotatingFileHandler):
+    """Rotate every hour but discard old content instead of keeping backups."""
+    def doRollover(self):
+        if self.stream:
+            self.stream.close()
+            self.stream = None
+        open(self.baseFilename, "w").close()
+        self.stream = self._open()
+        self.rolloverAt = self.computeRollover(int(time.time()))
+
 log_handlers = [logging.StreamHandler(sys.stdout)]
 
-# Only add file handler if we can write to the log file
 log_path = "/var/log/song-tracker.log"
 try:
     with open(log_path, "a") as f:
         pass
-    log_handlers.append(logging.FileHandler(log_path))
+    log_handlers.append(_HourlyPurgeHandler(log_path, when="h", interval=1, backupCount=0))
 except PermissionError:
     pass  # journald will capture stdout anyway
 
@@ -320,9 +330,10 @@ def continuous_loop(conn: sqlite3.Connection) -> None:
     BUFFER_CHUNKS_NEEDED = int(SAMPLE_DURATION / 0.2)  # chunks to accumulate before identifying
     SILENCE_CHUNKS_NEEDED = max(1, int(SILENCE_DURATION / 0.2))
 
-    state          = "WAITING"
-    pcm_buffer     = bytearray()
-    silence_count  = 0
+    state            = "WAITING"
+    pcm_buffer       = bytearray()
+    silence_count    = 0
+    _last_status_log = 0.0
     last_song      = [None]   # list so the worker thread can mutate it
     last_song_lock = threading.Lock()
     identifying    = threading.Event()
@@ -375,13 +386,17 @@ def continuous_loop(conn: sqlite3.Connection) -> None:
             rms     = audioop.rms(chunk, 2)
             is_loud = rms >= SILENCE_THRESHOLD
 
+            now = time.time()
+
             if state == "WAITING":
                 if is_loud:
                     pcm_buffer = bytearray(chunk)
                     state = "BUFFERING"
+                    _last_status_log = now
                     log.debug("[WAITING→BUFFERING] Audio detected (RMS %d), buffering...", rms)
-                else:
-                    log.debug("[WAITING] Silence (RMS %d < threshold %d)", rms, SILENCE_THRESHOLD)
+                elif now - _last_status_log >= 10:
+                    log.debug("[WAITING] Silence (RMS %d, threshold %d)", rms, SILENCE_THRESHOLD)
+                    _last_status_log = now
 
             elif state == "BUFFERING":
                 pcm_buffer += chunk
@@ -400,49 +415,57 @@ def continuous_loop(conn: sqlite3.Connection) -> None:
                         log.debug("[BUFFERING→COOLDOWN] %.1fs buffered, identification already in flight.", buffered_s)
                     state = "COOLDOWN"
                     silence_count = 0
+                    _last_status_log = now
                 elif not is_loud:
                     silence_count += 1
-                    remaining_s = (BUFFER_CHUNKS_NEEDED - silence_count) * 0.2
-                    log.debug("[BUFFERING] Silent chunk (RMS %d), reset in %.1fs if no audio.", rms, remaining_s)
                     if silence_count >= BUFFER_CHUNKS_NEEDED:
                         log.debug("[BUFFERING→WAITING] Audio dropped — %.1fs buffered, resetting.", buffered_s)
                         state = "WAITING"
                         pcm_buffer.clear()
                         silence_count = 0
+                        _last_status_log = now
+                    elif now - _last_status_log >= 2:
+                        log.debug("[BUFFERING] Silent chunk (RMS %d) — %.1fs buffered so far.", rms, buffered_s)
+                        _last_status_log = now
                 else:
                     silence_count = 0
-                    log.debug("[BUFFERING] %.1fs / %ds buffered (RMS %d).", buffered_s, SAMPLE_DURATION, rms)
+                    if now - _last_status_log >= 2:
+                        log.debug("[BUFFERING] %.1fs / %ds buffered (RMS %d).", buffered_s, SAMPLE_DURATION, rms)
+                        _last_status_log = now
 
             elif state == "COOLDOWN":
-                if retry_after[0] is not None and time.time() >= retry_after[0]:
+                if retry_after[0] is not None and now >= retry_after[0]:
                     retry_after[0] = None
                     identifying.clear()
                     state = "WAITING"
                     silence_count = 0
                     pcm_buffer.clear()
+                    _last_status_log = now
                     log.debug("[COOLDOWN→WAITING] Retry interval elapsed, listening for audio again.")
                 elif not is_loud:
                     silence_count += 1
-                    remaining_s = (SILENCE_CHUNKS_NEEDED - silence_count) * 0.2
-                    if retry_after[0] is not None:
-                        secs_left = max(0, retry_after[0] - time.time())
-                        log.debug("[COOLDOWN] Silence (RMS %d) — retrying in %.0fs.", rms, secs_left)
-                    else:
-                        log.debug("[COOLDOWN] Silence (RMS %d) — track end in %.1fs.", rms, max(remaining_s, 0))
                     if silence_count >= SILENCE_CHUNKS_NEEDED:
                         retry_after[0] = None
                         identifying.clear()
                         state = "WAITING"
                         silence_count = 0
                         pcm_buffer.clear()
+                        _last_status_log = now
                         log.debug("[COOLDOWN→WAITING] Silence confirmed, ready for next track.")
+                    elif now - _last_status_log >= 10:
+                        if retry_after[0] is not None:
+                            log.debug("[COOLDOWN] Silence (RMS %d) — retrying in %.0fs.", rms, max(0, retry_after[0] - now))
+                        else:
+                            log.debug("[COOLDOWN] Silence (RMS %d) — waiting for track end.", rms)
+                        _last_status_log = now
                 else:
                     silence_count = 0
-                    if retry_after[0] is not None:
-                        secs_left = max(0, retry_after[0] - time.time())
-                        log.debug("[COOLDOWN] Audio still playing (RMS %d) — retrying in %.0fs.", rms, secs_left)
-                    else:
-                        log.debug("[COOLDOWN] Audio still playing (RMS %d) — waiting for silence.", rms)
+                    if now - _last_status_log >= 10:
+                        if retry_after[0] is not None:
+                            log.debug("[COOLDOWN] Audio playing (RMS %d) — retrying in %.0fs.", rms, max(0, retry_after[0] - now))
+                        else:
+                            log.debug("[COOLDOWN] Audio playing (RMS %d) — waiting for silence.", rms)
+                        _last_status_log = now
     finally:
         os.close(fifo_fd)
         proc.terminate()

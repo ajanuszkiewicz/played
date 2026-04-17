@@ -490,12 +490,13 @@
   /* ── System stats ── */
   .sys-grid {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(4, 1fr);
     gap: 12px;
     margin-bottom: 2rem;
   }
 
-  @media (max-width: 500px) { .sys-grid { grid-template-columns: 1fr; } }
+  @media (max-width: 700px) { .sys-grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 400px) { .sys-grid { grid-template-columns: 1fr; } }
 
   .sys-card {
     background: var(--surface);
@@ -632,6 +633,12 @@
       <div class="sys-value" id="sys-temp">—</div>
       <div class="sys-sub">CPU core</div>
       <div class="sys-bar-track"><div class="sys-bar-fill" id="sys-temp-bar" style="width:0%"></div></div>
+    </div>
+    <div class="sys-card">
+      <div class="sys-label">Storage</div>
+      <div class="sys-value" id="sys-disk">—</div>
+      <div class="sys-sub" id="sys-disk-sub">used / total</div>
+      <div class="sys-bar-track"><div class="sys-bar-fill" id="sys-disk-bar" style="width:0%"></div></div>
     </div>
   </div>
 
@@ -971,6 +978,18 @@ async function loadSystem() {
       tempEl.className   = 'sys-value' + (t > 75 ? ' hot' : t > 60 ? ' warm' : '');
       tempBar.style.width     = Math.min(t / 85 * 100, 100) + '%';
       tempBar.className = 'sys-bar-fill' + (t > 75 ? ' hot' : t > 60 ? ' warm' : '');
+    }
+
+    // Storage
+    if (d.disk_percent != null) {
+      const diskEl  = el('sys-disk');
+      const diskBar = el('sys-disk-bar');
+      const pct     = d.disk_percent;
+      diskEl.textContent            = pct + '%';
+      el('sys-disk-sub').textContent = d.disk_used_gb + ' / ' + d.disk_total_gb + ' GB';
+      diskEl.className  = 'sys-value' + (pct > 90 ? ' hot' : pct > 75 ? ' warm' : '');
+      diskBar.style.width     = pct + '%';
+      diskBar.className = 'sys-bar-fill' + (pct > 90 ? ' hot' : pct > 75 ? ' warm' : '');
     }
   } catch(e) { /* silently skip if Pi stats unavailable */ }
 }
