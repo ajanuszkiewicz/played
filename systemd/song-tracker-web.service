@@ -1,0 +1,21 @@
+[Unit]
+Description=Song Tracker – Web Dashboard
+After=network.target song-tracker.service
+
+[Service]
+Type=simple
+User=song-tracker
+EnvironmentFile=/etc/song-tracker/env
+ExecStart=/usr/local/bin/song-tracker/venv/bin/python /usr/local/bin/song-tracker/web_server.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=song-tracker-web
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/song-tracker
+
+[Install]
+WantedBy=multi-user.target

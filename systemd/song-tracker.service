@@ -1,0 +1,23 @@
+[Unit]
+Description=Song Tracker – Audio Recognition Daemon
+After=network.target sound.target
+
+[Service]
+Type=simple
+User=song-tracker
+Group=audio
+EnvironmentFile=/etc/song-tracker/env
+ExecStart=/usr/local/bin/song-tracker/venv/bin/python /usr/local/bin/song-tracker/song_tracker.py
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=song-tracker
+
+Environment=TMPDIR=/var/lib/song-tracker/tmp
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/song-tracker /var/lib/song-tracker/tmp /var/log
+
+[Install]
+WantedBy=multi-user.target
