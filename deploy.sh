@@ -2,7 +2,7 @@
 PI=adamj@platipi.local
 
 echo "==> Syncing files..."
-rsync -av --exclude='.DS_Store' ./ $PI:/home/adamj/rpi-song-tracker/
+rsync -av --exclude='.DS_Store' --exclude='.git' --exclude='.gitignore' ./ $PI:/home/adamj/rpi-song-tracker/
 
 echo "==> Deploying on Pi..."
 ssh $PI "
