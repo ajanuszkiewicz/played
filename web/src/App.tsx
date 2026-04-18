@@ -49,7 +49,7 @@ export default function App() {
   const recent = stats?.recent[0] ?? null
   const isActive = recent ? (Date.now() - toUTC(recent.played_at)) < 10 * 60_000 : false
   const currentSong = isActive && recent
-    ? { artist: recent.artist, title: recent.title, album: recent.album, albumArt: recent.cover_art ?? undefined }
+    ? { id: recent.id, artist: recent.artist, title: recent.title, album: recent.album, albumArt: recent.cover_art ?? undefined, rating: recent.rating }
     : null
   const lastSong = !isActive && recent
     ? { artist: recent.artist, title: recent.title, playedAt: recent.played_at }

@@ -100,6 +100,10 @@ def init_db(path: str) -> sqlite3.Connection:
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_played_at ON songs(played_at DESC)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_artist ON songs(artist)")
+    try:
+        conn.execute("ALTER TABLE songs ADD COLUMN rating REAL")
+    except sqlite3.OperationalError:
+        pass  # column already exists
     conn.execute("""
         CREATE TABLE IF NOT EXISTS shazam_calls (
             id        INTEGER PRIMARY KEY AUTOINCREMENT,

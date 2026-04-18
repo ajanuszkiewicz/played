@@ -107,7 +107,7 @@ def api_stats():
     """).fetchall()
 
     recent = db.execute("""
-        SELECT played_at, title, artist, album, cover_art
+        SELECT id, played_at, title, artist, album, cover_art, rating
         FROM songs ORDER BY played_at DESC LIMIT 5
     """).fetchall()
 
@@ -160,6 +160,20 @@ def api_artist_detail():
         "top_songs": [dict(r) for r in top_songs],
         "albums":    [r["album"] for r in albums],
     })
+
+
+@app.route("/api/songs/<int:song_id>", methods=["PATCH"])
+def api_song_patch(song_id):
+    db   = get_db()
+    data = request.get_json(silent=True) or {}
+    if "rating" not in data:
+        return jsonify({"error": "rating required"}), 400
+    rating = data["rating"]
+    if rating is not None and not (0 <= rating <= 5 and rating * 2 == int(rating * 2)):
+        return jsonify({"error": "rating must be 0–5 in 0.5 steps"}), 400
+    db.execute("UPDATE songs SET rating = ? WHERE id = ?", (rating, song_id))
+    db.commit()
+    return jsonify({"ok": True})
 
 
 @app.route("/api/songs/<int:song_id>")

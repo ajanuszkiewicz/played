@@ -1,9 +1,11 @@
 export interface RecentSong {
+  id: number
   played_at: string
   title: string
   artist: string
   album: string | null
   cover_art: string | null
+  rating: number | null
 }
 
 export interface StatsData {
