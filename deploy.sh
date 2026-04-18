@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -e
-PI=adamj@platipi.local
+PI=adamj@192.168.0.234
 
 echo "==> Building web UI..."
 cd web
