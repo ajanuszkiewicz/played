@@ -16,9 +16,12 @@ function sinceISO(filter: string): string {
   return new Date(now - days[filter] * 86_400_000).toISOString().slice(0, 10)
 }
 
+const PAGE_SIZE = 10
+
 export function TopArtists() {
   const [artists, setArtists] = useState<ArtistSummary[]>([])
   const [dateFilter, setDateFilter] = useState('all')
+  const [page, setPage] = useState(1)
   const [selected, setSelected] = useState<ArtistSummary | null>(null)
   const [detail, setDetail] = useState<ArtistDetail | null>(null)
   const [loadingDetail, setLoadingDetail] = useState(false)
@@ -28,9 +31,13 @@ export function TopArtists() {
     const params = since ? '?since=' + since : ''
     fetch('/api/artists' + params)
       .then(r => r.json())
-      .then(setArtists)
+      .then((data: ArtistSummary[]) => { setArtists(data); setPage(1) })
       .catch(() => {})
   }, [dateFilter])
+
+  const pages = Math.ceil(artists.length / PAGE_SIZE)
+  const pageArtists = artists.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+  const globalOffset = (page - 1) * PAGE_SIZE
 
   const selectArtist = async (artist: ArtistSummary) => {
     setSelected(artist)
@@ -122,27 +129,46 @@ export function TopArtists() {
           </div>
         </div>
       ) : (
-        <div className="space-y-2">
-          {artists.length === 0 ? (
-            <p className="text-gray-500 text-sm text-center py-8">No data yet.</p>
-          ) : artists.map((artist, idx) => (
-            <button
-              key={artist.artist}
-              onClick={() => selectArtist(artist)}
-              className="w-full flex justify-between items-center py-3 px-4 hover:bg-gray-700/30 rounded-xl text-left transition-all group border border-transparent hover:border-gray-600/30"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-xs shrink-0">
-                  {idx + 1}
+        <div>
+          <div className="space-y-2">
+            {artists.length === 0 ? (
+              <p className="text-gray-500 text-sm text-center py-8">No data yet.</p>
+            ) : pageArtists.map((artist, idx) => (
+              <button
+                key={artist.artist}
+                onClick={() => selectArtist(artist)}
+                className="w-full flex justify-between items-center py-3 px-4 hover:bg-gray-700/30 rounded-xl text-left transition-all group border border-transparent hover:border-gray-600/30"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-xs shrink-0">
+                    {globalOffset + idx + 1}
+                  </div>
+                  <div>
+                    <p className="text-sm text-white group-hover:text-blue-400 transition-colors">{artist.artist}</p>
+                    <p className="text-xs text-gray-500">{artist.plays.toLocaleString()} plays</p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-sm text-white group-hover:text-blue-400 transition-colors">{artist.artist}</p>
-                  <p className="text-xs text-gray-500">{artist.plays.toLocaleString()} plays</p>
-                </div>
+                <ChevronRight size={18} className="text-gray-600 group-hover:text-gray-400 group-hover:translate-x-1 transition-all shrink-0" />
+              </button>
+            ))}
+          </div>
+          {pages > 1 && (
+            <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-700/50">
+              <span className="text-xs text-gray-500">{artists.length} artists · page {page} of {pages}</span>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setPage(p => p - 1)}
+                  disabled={page <= 1}
+                  className="px-3 py-1.5 text-xs bg-gray-700/50 border border-gray-600/50 rounded-lg text-gray-300 hover:bg-gray-700 disabled:opacity-30 disabled:cursor-default transition-colors"
+                >← Prev</button>
+                <button
+                  onClick={() => setPage(p => p + 1)}
+                  disabled={page >= pages}
+                  className="px-3 py-1.5 text-xs bg-gray-700/50 border border-gray-600/50 rounded-lg text-gray-300 hover:bg-gray-700 disabled:opacity-30 disabled:cursor-default transition-colors"
+                >Next →</button>
               </div>
-              <ChevronRight size={18} className="text-gray-600 group-hover:text-gray-400 group-hover:translate-x-1 transition-all shrink-0" />
-            </button>
-          ))}
+            </div>
+          )}
         </div>
       )}
     </div>
