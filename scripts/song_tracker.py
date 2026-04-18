@@ -31,9 +31,10 @@ AUDIO_DEVICE      = os.getenv("AUDIO_DEVICE", "default")
 AUDIO_FIFO        = os.getenv("AUDIO_FIFO", "/var/lib/song-tracker/audio.fifo")
 SAMPLE_DURATION   = int(os.getenv("SAMPLE_DURATION", "10"))
 POLL_INTERVAL     = int(os.getenv("POLL_INTERVAL", "45"))
-SILENCE_THRESHOLD = int(os.getenv("SILENCE_THRESHOLD", "500"))
-SILENCE_DURATION  = int(os.getenv("SILENCE_DURATION", "2"))
-RETRY_INTERVAL    = int(os.getenv("RETRY_INTERVAL", "30"))
+SILENCE_THRESHOLD   = int(os.getenv("SILENCE_THRESHOLD", "500"))
+IDENTIFY_THRESHOLD  = int(os.getenv("IDENTIFY_THRESHOLD", "1000"))
+SILENCE_DURATION    = int(os.getenv("SILENCE_DURATION", "2"))
+RETRY_INTERVAL      = int(os.getenv("RETRY_INTERVAL", "30"))
 MONITOR_MODE      = os.getenv("MONITOR_MODE", "continuous")
 LOG_LEVEL         = os.getenv("LOG_LEVEL", "INFO")
 
@@ -402,7 +403,18 @@ def continuous_loop(conn: sqlite3.Connection) -> None:
                 pcm_buffer += chunk
                 buffered_s = len(pcm_buffer) / CHUNK_BYTES * 0.2
                 if len(pcm_buffer) >= CHUNK_BYTES * BUFFER_CHUNKS_NEEDED:
-                    if not identifying.is_set():
+                    buf_rms = audioop.rms(pcm_buffer, 2)
+                    if buf_rms < IDENTIFY_THRESHOLD:
+                        log.debug(
+                            "[BUFFERING→WAITING] Buffer RMS %d below identify threshold %d "
+                            "(transient noise — amp click, needle drop, etc.) — discarding.",
+                            buf_rms, IDENTIFY_THRESHOLD,
+                        )
+                        state = "WAITING"
+                        pcm_buffer.clear()
+                        silence_count = 0
+                        _last_status_log = now
+                    elif not identifying.is_set():
                         identifying.set()
                         snapshot = bytes(pcm_buffer)
                         threading.Thread(
@@ -410,12 +422,18 @@ def continuous_loop(conn: sqlite3.Connection) -> None:
                             args=(conn, snapshot, identifying, last_song, last_song_lock, retry_after),
                             daemon=True,
                         ).start()
-                        log.debug("[BUFFERING→COOLDOWN] %.1fs buffered, sending to Shazam.", buffered_s)
+                        log.debug(
+                            "[BUFFERING→COOLDOWN] Buffer RMS %d, %.1fs buffered, sending to Shazam.",
+                            buf_rms, buffered_s,
+                        )
+                        state = "COOLDOWN"
+                        silence_count = 0
+                        _last_status_log = now
                     else:
                         log.debug("[BUFFERING→COOLDOWN] %.1fs buffered, identification already in flight.", buffered_s)
-                    state = "COOLDOWN"
-                    silence_count = 0
-                    _last_status_log = now
+                        state = "COOLDOWN"
+                        silence_count = 0
+                        _last_status_log = now
                 elif not is_loud:
                     silence_count += 1
                     if silence_count >= BUFFER_CHUNKS_NEEDED:
