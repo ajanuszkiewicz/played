@@ -67,7 +67,6 @@ export default function App() {
             </div>
             <div>
               <h1 className="text-white text-2xl">Song Tracker</h1>
-              <p className="text-gray-500 text-xs">raspberry pi · local network</p>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
