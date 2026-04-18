@@ -203,6 +203,16 @@ def api_system():
         stats["temp_c"] = None
 
     try:
+        db = get_db()
+        since_1h = (datetime.utcnow() - timedelta(hours=1)).isoformat(timespec="seconds") + "Z"
+        row = db.execute(
+            "SELECT COUNT(*) FROM shazam_calls WHERE called_at >= ?", (since_1h,)
+        ).fetchone()
+        stats["shazam_calls_per_hour"] = row[0] if row else 0
+    except Exception:
+        stats["shazam_calls_per_hour"] = None
+
+    try:
         sv = os.statvfs(DB_PATH)
         total_kb = sv.f_blocks * sv.f_frsize // 1024
         free_kb  = sv.f_bavail * sv.f_frsize // 1024

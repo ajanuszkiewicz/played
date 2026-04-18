@@ -1,4 +1,4 @@
-import { Cpu, MemoryStick, Thermometer, HardDrive } from 'lucide-react'
+import { Cpu, MemoryStick, Thermometer, HardDrive, Fingerprint } from 'lucide-react'
 import type { SysStats } from '../types'
 
 interface Props {
@@ -36,7 +36,7 @@ function StatCard({ label, value, sub, percent, icon, color }: CardProps) {
 
 export function SystemStats({ stats: s }: Props) {
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
       <StatCard
         label="CPU"
         value={s?.cpu_percent != null ? `${s.cpu_percent}%` : null}
@@ -68,6 +68,14 @@ export function SystemStats({ stats: s }: Props) {
         percent={s?.disk_percent ?? null}
         icon={<HardDrive size={18} className="text-emerald-400" />}
         color="bg-emerald-500"
+      />
+      <StatCard
+        label="Shazam / hr"
+        value={s?.shazam_calls_per_hour != null ? String(s.shazam_calls_per_hour) : null}
+        sub="calls last hour"
+        percent={null}
+        icon={<Fingerprint size={18} className="text-sky-400" />}
+        color="bg-sky-500"
       />
     </div>
   )

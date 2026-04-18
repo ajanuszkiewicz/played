@@ -35,6 +35,7 @@ export interface SysStats {
   disk_used_gb: number | null
   disk_total_gb: number | null
   disk_percent: number | null
+  shazam_calls_per_hour: number | null
 }
 
 export interface ArtistSummary {

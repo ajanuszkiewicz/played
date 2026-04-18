@@ -100,6 +100,14 @@ def init_db(path: str) -> sqlite3.Connection:
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_played_at ON songs(played_at DESC)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_artist ON songs(artist)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS shazam_calls (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            called_at TEXT NOT NULL,
+            success   INTEGER NOT NULL DEFAULT 0
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_calls_at ON shazam_calls(called_at DESC)")
     conn.commit()
     log.info("Database initialised at %s", path)
     return conn
@@ -265,6 +273,12 @@ def _identify_worker(
         write_wav(pcm_bytes, tmp.name)
         fp     = audio_fingerprint(tmp.name)
         result = identify_song(tmp.name)
+        called_at = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+        conn.execute(
+            "INSERT INTO shazam_calls (called_at, success) VALUES (?, ?)",
+            (called_at, 1 if result else 0),
+        )
+        conn.commit()
         if result:
             current = (result.get("title", ""), result.get("subtitle", ""))
             with last_song_lock:
