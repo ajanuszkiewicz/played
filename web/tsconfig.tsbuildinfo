@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/main.tsx","./src/types.ts","./src/components/activitychart.tsx","./src/components/currentlyplaying.tsx","./src/components/generalstats.tsx","./src/components/lastplayedsongs.tsx","./src/components/listenbutton.tsx","./src/components/systemstats.tsx","./src/components/topartists.tsx"],"version":"5.9.3"}

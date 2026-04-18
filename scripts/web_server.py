@@ -16,7 +16,7 @@ DB_PATH     = os.getenv("DB_PATH", "/var/lib/song-tracker/songs.db")
 HOST        = os.getenv("WEB_HOST", "0.0.0.0")
 PORT        = int(os.getenv("WEB_PORT", "8080"))
 AUDIO_FIFO  = os.getenv("AUDIO_FIFO", "/var/lib/song-tracker/audio.fifo")
-WEB_DIR     = Path(__file__).parent / "web"   # fixed: same directory as script
+WEB_DIR     = Path(__file__).parent / "web"
 
 app = Flask(__name__, static_folder=str(WEB_DIR))
 
@@ -107,7 +107,7 @@ def api_stats():
     """).fetchall()
 
     recent = db.execute("""
-        SELECT played_at, title, artist, cover_art
+        SELECT played_at, title, artist, album, cover_art
         FROM songs ORDER BY played_at DESC LIMIT 5
     """).fetchall()
 
@@ -131,11 +131,35 @@ def api_stats():
 @app.route("/api/artists")
 def api_artists():
     db = get_db()
-    rows = db.execute("""
-        SELECT artist, COUNT(*) as plays, MAX(played_at) as last_played
-        FROM songs GROUP BY artist ORDER BY plays DESC
-    """).fetchall()
+    since = request.args.get("since")
+    where = "WHERE played_at >= ?" if since else ""
+    params = [since] if since else []
+    rows = db.execute(
+        f"SELECT artist, COUNT(*) as plays, MAX(played_at) as last_played "
+        f"FROM songs {where} GROUP BY artist ORDER BY plays DESC",
+        params,
+    ).fetchall()
     return jsonify([dict(r) for r in rows])
+
+
+@app.route("/api/artists/detail")
+def api_artist_detail():
+    artist = request.args.get("name", "")
+    db = get_db()
+    top_songs = db.execute("""
+        SELECT title, COUNT(*) as plays
+        FROM songs WHERE artist = ?
+        GROUP BY title ORDER BY plays DESC LIMIT 5
+    """, (artist,)).fetchall()
+    albums = db.execute("""
+        SELECT DISTINCT album FROM songs
+        WHERE artist = ? AND album IS NOT NULL
+        ORDER BY album LIMIT 5
+    """, (artist,)).fetchall()
+    return jsonify({
+        "top_songs": [dict(r) for r in top_songs],
+        "albums":    [r["album"] for r in albums],
+    })
 
 
 @app.route("/api/songs/<int:song_id>")
