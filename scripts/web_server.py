@@ -12,11 +12,12 @@ from pathlib import Path
 
 from flask import Flask, jsonify, request, send_from_directory, g, Response, stream_with_context
 
-DB_PATH     = os.getenv("DB_PATH", "/var/lib/song-tracker/songs.db")
-HOST        = os.getenv("WEB_HOST", "0.0.0.0")
-PORT        = int(os.getenv("WEB_PORT", "8080"))
-AUDIO_FIFO  = os.getenv("AUDIO_FIFO", "/var/lib/song-tracker/audio.fifo")
-WEB_DIR     = Path(__file__).parent / "web"
+DB_PATH       = os.getenv("DB_PATH", "/var/lib/song-tracker/songs.db")
+HOST          = os.getenv("WEB_HOST", "0.0.0.0")
+PORT          = int(os.getenv("WEB_PORT", "8080"))
+AUDIO_FIFO    = os.getenv("AUDIO_FIFO", "/var/lib/song-tracker/audio.fifo")
+TRIGGER_FILE  = os.getenv("TRIGGER_FILE", "/var/lib/song-tracker/manual_trigger")
+WEB_DIR       = Path(__file__).parent / "web"
 
 app = Flask(__name__, static_folder=str(WEB_DIR))
 
@@ -69,7 +70,7 @@ def api_songs():
 
     rows = db.execute(
         f"""SELECT id, played_at, title, artist, album, release_date,
-                   cover_art, apple_id
+                   cover_art, apple_id, rating
             FROM songs {where_sql}
             ORDER BY played_at DESC
             LIMIT ? OFFSET ?""",
@@ -156,9 +157,14 @@ def api_artist_detail():
         WHERE artist = ? AND album IS NOT NULL
         ORDER BY album LIMIT 5
     """, (artist,)).fetchall()
+    avg = db.execute(
+        "SELECT ROUND(AVG(rating), 1) FROM songs WHERE artist = ? AND rating IS NOT NULL",
+        (artist,),
+    ).fetchone()[0]
     return jsonify({
         "top_songs": [dict(r) for r in top_songs],
         "albums":    [r["album"] for r in albums],
+        "avg_rating": avg,
     })
 
 
@@ -174,6 +180,34 @@ def api_song_patch(song_id):
     db.execute("UPDATE songs SET rating = ? WHERE id = ?", (rating, song_id))
     db.commit()
     return jsonify({"ok": True})
+
+
+@app.route("/api/songs/<int:song_id>", methods=["DELETE"])
+def api_song_delete(song_id):
+    db = get_db()
+    db.execute("DELETE FROM songs WHERE id = ?", (song_id,))
+    db.commit()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/artists", methods=["DELETE"])
+def api_artist_delete():
+    artist = request.args.get("name", "").strip()
+    if not artist:
+        return jsonify({"error": "name required"}), 400
+    db = get_db()
+    db.execute("DELETE FROM songs WHERE artist = ?", (artist,))
+    db.commit()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/trigger", methods=["POST"])
+def api_trigger():
+    try:
+        Path(TRIGGER_FILE).touch()
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/songs/<int:song_id>")

@@ -1,6 +1,6 @@
-import { useState } from 'react'
 import { Music } from 'lucide-react'
 import { toUTC } from '../App'
+import { StarRating } from './StarRating'
 
 interface Song {
   id: number
@@ -20,6 +20,7 @@ interface LastSong {
 interface Props {
   song: Song | null
   lastSong: LastSong | null
+  onRate?: (songId: number, rating: number | null) => void
 }
 
 function timeAgo(iso: string): string {
@@ -31,82 +32,8 @@ function timeAgo(iso: string): string {
     .toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
-// SVG star — filled, half (left 50%), or empty
-function StarShape({ fill }: { fill: 'full' | 'half' | 'empty' }) {
-  const id = `half-${Math.random().toString(36).slice(2)}`
-  const path = "M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-      {fill === 'half' && (
-        <defs>
-          <linearGradient id={id} x1="0" x2="1" y1="0" y2="0">
-            <stop offset="50%" stopColor="#fbbf24" />
-            <stop offset="50%" stopColor="transparent" />
-          </linearGradient>
-        </defs>
-      )}
-      <path
-        d={path}
-        fill={fill === 'full' ? '#fbbf24' : fill === 'half' ? `url(#${id})` : 'transparent'}
-        stroke={fill === 'empty' ? '#4b5563' : '#fbbf24'}
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  )
-}
 
-function StarRating({ songId, initial }: { songId: number; initial: number | null }) {
-  const [rating, setRating] = useState<number | null>(initial)
-  const [hover, setHover] = useState<number | null>(null)
-  const [saving, setSaving] = useState(false)
-
-  const display = hover ?? rating ?? 0
-
-  const submit = async (value: number) => {
-    // Toggle off if clicking the same value
-    const next = value === rating ? null : value
-    setRating(next)
-    setSaving(true)
-    try {
-      await fetch(`/api/songs/${songId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rating: next }),
-      })
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <div className={`flex items-center gap-1 transition-opacity ${saving ? 'opacity-50' : ''}`}>
-      {[1, 2, 3, 4, 5].map(star => {
-        const fullFill = display >= star ? 'full' : display >= star - 0.5 ? 'half' : 'empty'
-        return (
-          <div key={star} className="relative cursor-pointer select-none" onMouseLeave={() => setHover(null)}>
-            <StarShape fill={fullFill} />
-            {/* left half → half star */}
-            <div
-              className="absolute inset-y-0 left-0 w-1/2"
-              onMouseEnter={() => setHover(star - 0.5)}
-              onClick={() => submit(star - 0.5)}
-            />
-            {/* right half → full star */}
-            <div
-              className="absolute inset-y-0 right-0 w-1/2"
-              onMouseEnter={() => setHover(star)}
-              onClick={() => submit(star)}
-            />
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-export function CurrentlyPlaying({ song, lastSong }: Props) {
+export function CurrentlyPlaying({ song, lastSong, onRate }: Props) {
   if (!song) {
     return (
       <div className="bg-gray-800/50 backdrop-blur-sm border border-gray-700/50 rounded-2xl p-8 flex flex-col items-center justify-center min-h-[400px] gap-4">
@@ -149,7 +76,7 @@ export function CurrentlyPlaying({ song, lastSong }: Props) {
         </p>
         {song.album && <p className="text-xs text-gray-500">{song.album}</p>}
         <div className="flex justify-center pt-1">
-          <StarRating songId={song.id} initial={song.rating} />
+          <StarRating key={song.id} songId={song.id} initial={song.rating} onRate={r => onRate?.(song.id, r)} />
         </div>
       </div>
     </div>

@@ -25,6 +25,7 @@ export interface Song {
   album: string | null
   release_date: string | null
   cover_art: string | null
+  rating: number | null
 }
 
 export interface SysStats {
@@ -49,4 +50,5 @@ export interface ArtistSummary {
 export interface ArtistDetail {
   top_songs: { title: string; plays: number }[]
   albums: string[]
+  avg_rating: number | null
 }

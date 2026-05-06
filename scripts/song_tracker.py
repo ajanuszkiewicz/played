@@ -5,6 +5,7 @@ Captures audio from ALSA input, identifies songs via ShazamIO
 (free, no API key required), and stores results in a SQLite database.
 """
 
+import argparse
 import audioop
 import os
 import select
@@ -36,7 +37,19 @@ IDENTIFY_THRESHOLD  = int(os.getenv("IDENTIFY_THRESHOLD", "1000"))
 SILENCE_DURATION    = int(os.getenv("SILENCE_DURATION", "2"))
 RETRY_INTERVAL      = int(os.getenv("RETRY_INTERVAL", "30"))
 MONITOR_MODE      = os.getenv("MONITOR_MODE", "continuous")
+TRIGGER_FILE      = os.getenv("TRIGGER_FILE", "/var/lib/song-tracker/manual_trigger")
 LOG_LEVEL         = os.getenv("LOG_LEVEL", "INFO")
+
+# ── CLI args (override env vars) ───────────────────────────────────────────────
+_parser = argparse.ArgumentParser(description="Song Tracker Daemon")
+_parser.add_argument(
+    "--log-level",
+    choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+    default=LOG_LEVEL,
+    help="Override LOG_LEVEL env var",
+)
+_args = _parser.parse_args()
+LOG_LEVEL = _args.log_level
 
 # ── Logging ────────────────────────────────────────────────────────────────────
 class _HourlyPurgeHandler(logging.handlers.TimedRotatingFileHandler):
@@ -404,6 +417,20 @@ def continuous_loop(conn: sqlite3.Connection) -> None:
             fifo_write(fifo_fd, chunk)
             rms     = audioop.rms(chunk, 2)
             is_loud = rms >= SILENCE_THRESHOLD
+
+            # Manual trigger — force a fresh identification, overriding any cooldown
+            if Path(TRIGGER_FILE).exists():
+                try:
+                    Path(TRIGGER_FILE).unlink()
+                except OSError:
+                    pass
+                log.info("[TRIGGER] Manual identify requested — overriding %s, resetting to BUFFERING.", state)
+                identifying.clear()
+                retry_after[0] = None
+                state = "BUFFERING"
+                pcm_buffer = bytearray(chunk)
+                silence_count = 0
+                _last_status_log = time.time()
 
             now = time.time()
 

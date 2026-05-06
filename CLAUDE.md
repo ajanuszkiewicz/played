@@ -163,6 +163,16 @@ arecord -l                                              # list capture devices
 arecord -D plughw:2,0 -f S16_LE -r 44100 -c 1 -d 5 /tmp/test.wav  # test capture
 aplay /tmp/test.wav                                     # play back test
 
+# Real-time RMS monitor (shows live level bar + threshold markers)
+/usr/local/bin/song-tracker/venv/bin/python \
+  /usr/local/bin/song-tracker/monitor_rms.py
+# Override device/thresholds:
+AUDIO_DEVICE=plughw:2,0 SILENCE_THRESHOLD=500 IDENTIFY_THRESHOLD=1000 \
+  /usr/local/bin/song-tracker/venv/bin/python \
+  /usr/local/bin/song-tracker/monitor_rms.py
+# Or with flags:
+#   monitor_rms.py --device plughw:2,0 --silence 500 --identify 1000
+
 # Run daemon manually (bypasses systemd for debugging)
 sudo -u song-tracker \
   TMPDIR=/var/lib/song-tracker/tmp \

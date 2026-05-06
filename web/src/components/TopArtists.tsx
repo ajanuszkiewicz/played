@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
-import { ChevronRight, ChevronLeft, Users, Disc3, Music } from 'lucide-react'
+import { ChevronRight, ChevronLeft, Users, Disc3, Music, Trash2 } from 'lucide-react'
+import { StarDisplay } from './StarRating'
 import type { ArtistSummary, ArtistDetail } from '../types'
 
 const DATE_FILTERS = [
@@ -51,6 +52,13 @@ export function TopArtists() {
     }
   }
 
+  const deleteArtist = async (name: string, e?: React.MouseEvent) => {
+    e?.stopPropagation()
+    setArtists(prev => prev.filter(a => a.artist !== name))
+    if (selected?.artist === name) { setSelected(null); setDetail(null) }
+    await fetch('/api/artists?' + new URLSearchParams({ name }), { method: 'DELETE' })
+  }
+
   return (
     <div className="bg-gray-800/50 backdrop-blur-sm border border-gray-700/50 rounded-2xl p-6">
       <div className="flex justify-between items-center mb-5">
@@ -73,17 +81,31 @@ export function TopArtists() {
 
       {selected ? (
         <div>
-          <button
-            onClick={() => { setSelected(null); setDetail(null) }}
-            className="flex items-center gap-2 text-sm text-gray-400 mb-6 hover:text-white transition-colors group"
-          >
-            <ChevronLeft size={16} className="group-hover:-translate-x-1 transition-transform" />
-            Back to artists
-          </button>
+          <div className="flex items-center justify-between mb-6">
+            <button
+              onClick={() => { setSelected(null); setDetail(null) }}
+              className="flex items-center gap-2 text-sm text-gray-400 hover:text-white transition-colors group"
+            >
+              <ChevronLeft size={16} className="group-hover:-translate-x-1 transition-transform" />
+              Back to artists
+            </button>
+            <button
+              onClick={() => deleteArtist(selected.artist)}
+              className="flex items-center gap-1.5 text-xs text-gray-600 hover:text-red-400 transition-colors"
+            >
+              <Trash2 size={13} />
+              Delete all plays
+            </button>
+          </div>
           <div>
             <div className="mb-6 pb-6 border-b border-gray-700/50">
               <h3 className="text-xl text-white mb-2">{selected.artist}</h3>
-              <p className="text-sm text-gray-400">{selected.plays.toLocaleString()} plays</p>
+              <div className="flex items-center gap-4 flex-wrap">
+                <p className="text-sm text-gray-400">{selected.plays.toLocaleString()} plays</p>
+                {detail?.avg_rating != null && (
+                  <StarDisplay rating={detail.avg_rating} size={14} />
+                )}
+              </div>
             </div>
             {loadingDetail ? (
               <div className="space-y-2">
@@ -134,22 +156,29 @@ export function TopArtists() {
             {artists.length === 0 ? (
               <p className="text-gray-500 text-sm text-center py-8">No data yet.</p>
             ) : pageArtists.map((artist, idx) => (
-              <button
-                key={artist.artist}
-                onClick={() => selectArtist(artist)}
-                className="w-full flex justify-between items-center py-3 px-4 hover:bg-gray-700/30 rounded-xl text-left transition-all group border border-transparent hover:border-gray-600/30"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-xs shrink-0">
-                    {globalOffset + idx + 1}
+              <div key={artist.artist} className="group flex items-center">
+                <button
+                  onClick={() => selectArtist(artist)}
+                  className="flex-1 flex justify-between items-center py-3 px-4 hover:bg-gray-700/30 rounded-xl text-left transition-all border border-transparent hover:border-gray-600/30"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-xs shrink-0">
+                      {globalOffset + idx + 1}
+                    </div>
+                    <div>
+                      <p className="text-sm text-white group-hover:text-blue-400 transition-colors">{artist.artist}</p>
+                      <p className="text-xs text-gray-500">{artist.plays.toLocaleString()} plays</p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-sm text-white group-hover:text-blue-400 transition-colors">{artist.artist}</p>
-                    <p className="text-xs text-gray-500">{artist.plays.toLocaleString()} plays</p>
-                  </div>
-                </div>
-                <ChevronRight size={18} className="text-gray-600 group-hover:text-gray-400 group-hover:translate-x-1 transition-all shrink-0" />
-              </button>
+                  <ChevronRight size={18} className="text-gray-600 group-hover:text-gray-400 group-hover:translate-x-1 transition-all shrink-0" />
+                </button>
+                <button
+                  onClick={e => deleteArtist(artist.artist, e)}
+                  className="ml-2 p-2 text-gray-700 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all shrink-0"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
             ))}
           </div>
           {pages > 1 && (

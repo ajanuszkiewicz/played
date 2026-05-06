@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Radio, Server, Cpu } from 'lucide-react'
+import { Radio, Zap } from 'lucide-react'
 import { CurrentlyPlaying } from './components/CurrentlyPlaying'
 import { LastPlayedSongs } from './components/LastPlayedSongs'
 import { GeneralStats } from './components/GeneralStats'
@@ -17,17 +17,15 @@ export function toUTC(s: string): number {
 export default function App() {
   const [stats, setStats] = useState<StatsData | null>(null)
   const [sysStats, setSysStats] = useState<SysStats | null>(null)
-  const [online, setOnline] = useState(false)
+  const [triggerState, setTriggerState] = useState<'idle' | 'loading' | 'done'>('idle')
+  const [ratingPatch, setRatingPatch] = useState<{ id: number; rating: number | null } | null>(null)
 
   const fetchStats = useCallback(async () => {
     try {
       const r = await fetch('/api/stats')
       if (!r.ok) throw new Error()
       setStats(await r.json())
-      setOnline(true)
-    } catch {
-      setOnline(false)
-    }
+    } catch { /* non-fatal */ }
   }, [])
 
   const fetchSystem = useCallback(async () => {
@@ -36,6 +34,20 @@ export default function App() {
       if (r.ok) setSysStats(await r.json())
     } catch { /* non-fatal */ }
   }, [])
+
+  const triggerIdentify = useCallback(async () => {
+    if (triggerState !== 'idle') return
+    setTriggerState('loading')
+    try {
+      await fetch('/api/trigger', { method: 'POST' })
+      setTriggerState('done')
+      // Refresh stats after SAMPLE_DURATION + a bit to pick up any new song
+      setTimeout(fetchStats, 15_000)
+    } catch {
+      setTriggerState('idle')
+    }
+    setTimeout(() => setTriggerState('idle'), 3_000)
+  }, [triggerState, fetchStats])
 
   useEffect(() => {
     fetchStats()
@@ -70,27 +82,29 @@ export default function App() {
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
+            <button
+              onClick={triggerIdentify}
+              disabled={triggerState !== 'idle'}
+              className={`px-4 py-2 border rounded-xl backdrop-blur-sm flex items-center gap-2 text-sm transition-all
+                ${triggerState === 'done'
+                  ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-400'
+                  : 'border-gray-700/50 bg-gray-800/50 text-gray-300 hover:border-blue-500/50 hover:text-blue-400 disabled:opacity-50 disabled:cursor-default'
+                }`}
+            >
+              <Zap size={16} className={triggerState === 'loading' ? 'animate-pulse' : ''} />
+              <span>{triggerState === 'done' ? 'Scanning…' : 'Identify Now'}</span>
+            </button>
             <ListenButton />
-            <div className="px-4 py-2 border border-gray-700/50 rounded-xl bg-gray-800/50 backdrop-blur-sm text-gray-300 flex items-center gap-2 text-sm">
-              <Server size={16} />
-              <span>Service</span>
-              <span className={`w-2 h-2 rounded-full ${online ? 'bg-emerald-500 shadow-lg shadow-emerald-500/50' : 'bg-red-500 shadow-lg shadow-red-500/50'}`} />
-            </div>
-            <div className="px-4 py-2 border border-gray-700/50 rounded-xl bg-gray-800/50 backdrop-blur-sm text-gray-300 flex items-center gap-2 text-sm">
-              <Cpu size={16} />
-              <span>Pi</span>
-              <span className={`w-2 h-2 rounded-full ${sysStats?.cpu_percent != null ? 'bg-emerald-500 shadow-lg shadow-emerald-500/50' : 'bg-gray-600'}`} />
-            </div>
           </div>
         </div>
 
         {/* Currently playing + recent songs */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
           <div className="lg:col-span-1">
-            <CurrentlyPlaying song={currentSong} lastSong={lastSong} />
+            <CurrentlyPlaying song={currentSong} lastSong={lastSong} onRate={(id, rating) => setRatingPatch({ id, rating })} />
           </div>
           <div className="lg:col-span-2">
-            <LastPlayedSongs />
+            <LastPlayedSongs latestId={stats?.recent[0]?.id ?? null} ratingPatch={ratingPatch} />
           </div>
         </div>
 
