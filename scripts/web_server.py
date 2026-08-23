@@ -53,6 +53,60 @@ def _weather_code_desc(code: int) -> str:
     return "cloudy"
 
 
+def _normalize_album(title: str) -> str:
+    """Lowercase + strip edition/remaster suffixes for fuzzy matching."""
+    t = title.lower().strip()
+    # Remove bracketed edition markers: (Deluxe Edition), (2011 Remaster), (Anniversary), etc.
+    t = re.sub(
+        r'\s*\([^)]*\b(edition|remaster(?:ed)?|anniversary|deluxe|expanded|bonus|special|version|mix|mono|stereo|re-?issue)\b[^)]*\)',
+        '', t, flags=re.IGNORECASE,
+    )
+    # Remove trailing standalone year: (2011)
+    t = re.sub(r'\s*\(\d{4}\)\s*$', '', t)
+    # Collapse punctuation and whitespace
+    t = re.sub(r'[^\w\s]', ' ', t)
+    return re.sub(r'\s+', ' ', t).strip()
+
+
+def _find_in_collection(db: sqlite3.Connection, artist: str, album: str) -> dict | None:
+    """Return the first matching collection row using tiered fuzzy matching."""
+    rows = db.execute(
+        "SELECT format, url, title FROM discogs_collection WHERE LOWER(artist) = LOWER(?)",
+        (artist,),
+    ).fetchall()
+    if not rows:
+        return None
+
+    al   = album.lower()
+    anorm = _normalize_album(album)
+
+    # Priority 1 — exact case-insensitive
+    for r in rows:
+        if r["title"].lower() == al:
+            return dict(r)
+
+    # Priority 2 — normalized match (ignores edition/remaster suffixes)
+    if anorm:
+        for r in rows:
+            if _normalize_album(r["title"]) == anorm:
+                return dict(r)
+
+    # Priority 3 — Shazam title is a substring of Discogs title
+    # e.g. "OK Computer" ⊂ "OK Computer OKNOTOK 20th Anniversary Edition"
+    if len(al) >= 5:
+        for r in rows:
+            if al in r["title"].lower():
+                return dict(r)
+
+    # Priority 4 — Discogs title is a substring of Shazam title (rarer)
+    for r in rows:
+        tl = r["title"].lower()
+        if len(tl) >= 5 and tl in al:
+            return dict(r)
+
+    return None
+
+
 def _get_location() -> tuple | None:
     global _location_cache
     if _location_cache is not None:
@@ -407,12 +461,9 @@ def api_discogs_check():
 
     db = get_db()
     try:
-        row = db.execute(
-            "SELECT format, url FROM discogs_collection WHERE LOWER(artist)=LOWER(?) AND LOWER(title)=LOWER(?)",
-            (artist, album),
-        ).fetchone()
-        if row:
-            return jsonify({"owned": True, "format": row["format"], "url": row["url"]})
+        match = _find_in_collection(db, artist, album)
+        if match:
+            return jsonify({"owned": True, "format": match["format"], "url": match["url"]})
         count = db.execute("SELECT COUNT(*) FROM discogs_collection").fetchone()[0]
         if count == 0:
             return jsonify({"owned": None, "reason": "syncing"})
