@@ -25,6 +25,7 @@ from datetime import datetime
 from pathlib import Path
 
 from shazamio import Shazam
+from discogs_utils import find_in_collection as _discogs_find
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 DB_PATH           = os.getenv("DB_PATH", "/var/lib/song-tracker/songs.db")
@@ -142,6 +143,16 @@ def record_song(conn: sqlite3.Connection, track: dict, fingerprint: str) -> bool
             elif "released" in title or "year" in title:
                 release_date = meta.get("text")
 
+    artist = track.get("subtitle", "Unknown")
+
+    # Use Discogs canonical naming if the album is in the collection
+    if album:
+        match = _discogs_find(conn, artist, album)
+        if match:
+            artist = match["artist"]
+            album  = match["title"]
+            log.debug("Discogs name: %s — %s", artist, album)
+
     try:
         conn.execute("""
             INSERT OR IGNORE INTO songs
@@ -151,7 +162,7 @@ def record_song(conn: sqlite3.Connection, track: dict, fingerprint: str) -> bool
         """, (
             now,
             track.get("title", "Unknown"),
-            track.get("subtitle", "Unknown"),
+            artist,
             album,
             release_date,
             track.get("images", {}).get("coverarthq") or track.get("images", {}).get("coverart"),
@@ -162,7 +173,7 @@ def record_song(conn: sqlite3.Connection, track: dict, fingerprint: str) -> bool
         ))
         conn.commit()
         if conn.execute("SELECT changes()").fetchone()[0]:
-            log.info("Recorded: %s — %s", track.get("subtitle"), track.get("title"))
+            log.info("Recorded: %s — %s", artist, track.get("title"))
             return True
         log.debug("Duplicate fingerprint, skipping.")
         return False

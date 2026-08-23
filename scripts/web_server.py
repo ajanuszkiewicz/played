@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from flask import Flask, jsonify, request, send_from_directory, g, Response, stream_with_context
+from discogs_utils import find_in_collection as _find_in_collection, normalize_songs as _normalize_songs
 
 DB_PATH       = os.getenv("DB_PATH", "/var/lib/song-tracker/songs.db")
 HOST          = os.getenv("WEB_HOST", "0.0.0.0")
@@ -52,59 +53,6 @@ def _weather_code_desc(code: int) -> str:
     if code >= 95:     return "thunderstorm"
     return "cloudy"
 
-
-def _normalize_album(title: str) -> str:
-    """Lowercase + strip edition/remaster suffixes for fuzzy matching."""
-    t = title.lower().strip()
-    # Remove bracketed edition markers: (Deluxe Edition), (2011 Remaster), (Anniversary), etc.
-    t = re.sub(
-        r'\s*\([^)]*\b(edition|remaster(?:ed)?|anniversary|deluxe|expanded|bonus|special|version|mix|mono|stereo|re-?issue)\b[^)]*\)',
-        '', t, flags=re.IGNORECASE,
-    )
-    # Remove trailing standalone year: (2011)
-    t = re.sub(r'\s*\(\d{4}\)\s*$', '', t)
-    # Collapse punctuation and whitespace
-    t = re.sub(r'[^\w\s]', ' ', t)
-    return re.sub(r'\s+', ' ', t).strip()
-
-
-def _find_in_collection(db: sqlite3.Connection, artist: str, album: str) -> dict | None:
-    """Return the first matching collection row using tiered fuzzy matching."""
-    rows = db.execute(
-        "SELECT format, url, title FROM discogs_collection WHERE LOWER(artist) = LOWER(?)",
-        (artist,),
-    ).fetchall()
-    if not rows:
-        return None
-
-    al   = album.lower()
-    anorm = _normalize_album(album)
-
-    # Priority 1 — exact case-insensitive
-    for r in rows:
-        if r["title"].lower() == al:
-            return dict(r)
-
-    # Priority 2 — normalized match (ignores edition/remaster suffixes)
-    if anorm:
-        for r in rows:
-            if _normalize_album(r["title"]) == anorm:
-                return dict(r)
-
-    # Priority 3 — Shazam title is a substring of Discogs title
-    # e.g. "OK Computer" ⊂ "OK Computer OKNOTOK 20th Anniversary Edition"
-    if len(al) >= 5:
-        for r in rows:
-            if al in r["title"].lower():
-                return dict(r)
-
-    # Priority 4 — Discogs title is a substring of Shazam title (rarer)
-    for r in rows:
-        tl = r["title"].lower()
-        if len(tl) >= 5 and tl in al:
-            return dict(r)
-
-    return None
 
 
 def _get_location() -> tuple | None:
@@ -229,6 +177,7 @@ def _sync_discogs_collection() -> None:
             (datetime.utcnow().isoformat(timespec="seconds") + "Z",),
         )
         conn.commit()
+        _normalize_songs(conn)
         conn.close()
     except Exception as e:
         app.logger.error("Discogs sync failed: %s", e)
@@ -496,6 +445,13 @@ def api_discogs_sync():
         return jsonify({"error": "not_configured"}), 400
     threading.Thread(target=_sync_discogs_collection, daemon=True).start()
     return jsonify({"ok": True, "syncing": True})
+
+
+@app.route("/api/discogs/normalize", methods=["POST"])
+def api_discogs_normalize():
+    db      = get_db()
+    updated = _normalize_songs(db)
+    return jsonify({"ok": True, "updated": updated})
 
 
 @app.route("/api/recommendations")
