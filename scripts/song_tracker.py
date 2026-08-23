@@ -25,7 +25,7 @@ from datetime import datetime
 from pathlib import Path
 
 from shazamio import Shazam
-from discogs_utils import find_in_collection as _discogs_find
+from discogs_utils import find_in_collection as _discogs_find, find_album_by_track as _discogs_find_by_track
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 DB_PATH           = os.getenv("DB_PATH", "/var/lib/song-tracker/songs.db")
@@ -143,7 +143,8 @@ def record_song(conn: sqlite3.Connection, track: dict, fingerprint: str) -> bool
             elif "released" in title or "year" in title:
                 release_date = meta.get("text")
 
-    artist = track.get("subtitle", "Unknown")
+    artist     = track.get("subtitle", "Unknown")
+    song_title = track.get("title", "Unknown")
 
     # Use Discogs canonical naming if the album is in the collection
     if album:
@@ -151,7 +152,19 @@ def record_song(conn: sqlite3.Connection, track: dict, fingerprint: str) -> bool
         if match:
             artist = match["artist"]
             album  = match["title"]
-            log.debug("Discogs name: %s — %s", artist, album)
+            log.debug("Discogs album match: %s — %s", artist, album)
+        else:
+            match = _discogs_find_by_track(conn, artist, song_title)
+            if match:
+                artist = match["artist"]
+                album  = match["title"]
+                log.debug("Discogs track match: %s — %s", artist, album)
+    else:
+        match = _discogs_find_by_track(conn, artist, song_title)
+        if match:
+            artist = match["artist"]
+            album  = match["title"]
+            log.debug("Discogs track match (no album): %s — %s", artist, album)
 
     try:
         conn.execute("""

@@ -17,7 +17,11 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from flask import Flask, jsonify, request, send_from_directory, g, Response, stream_with_context
-from discogs_utils import find_in_collection as _find_in_collection, normalize_songs as _normalize_songs
+from discogs_utils import (
+    find_in_collection as _find_in_collection,
+    find_album_by_track as _find_album_by_track,
+    normalize_songs as _normalize_songs,
+)
 
 DB_PATH       = os.getenv("DB_PATH", "/var/lib/song-tracker/songs.db")
 HOST          = os.getenv("WEB_HOST", "0.0.0.0")
@@ -31,10 +35,11 @@ LATITUDE          = os.getenv("LATITUDE",  "").strip()
 LONGITUDE         = os.getenv("LONGITUDE", "").strip()
 WEB_DIR           = Path(__file__).parent / "web"
 
-_sync_lock        = threading.Lock()
-_sync_in_progress = False
-_setup_done       = False
-_setup_lock       = threading.Lock()
+_sync_lock               = threading.Lock()
+_sync_in_progress        = False
+_tracklist_sync_in_progress = False
+_setup_done              = False
+_setup_lock              = threading.Lock()
 
 _location_cache: tuple | None = None   # (lat, lon, city)
 _rec_cache: dict = {}                  # cache_key -> {data, ts}
@@ -129,6 +134,14 @@ def _ensure_discogs_tables(conn: sqlite3.Connection) -> None:
             value TEXT
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS discogs_tracks (
+            release_id INTEGER NOT NULL,
+            title      TEXT    NOT NULL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_tracks_release ON discogs_tracks(release_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_tracks_title   ON discogs_tracks(LOWER(title))")
     conn.commit()
 
 
@@ -179,11 +192,46 @@ def _sync_discogs_collection() -> None:
         conn.commit()
         _normalize_songs(conn)
         conn.close()
+        # Kick off tracklist sync in its own thread so _sync_in_progress is released first
+        threading.Thread(target=_sync_tracklists, args=(all_releases,), daemon=True).start()
     except Exception as e:
         app.logger.error("Discogs sync failed: %s", e)
     finally:
         with _sync_lock:
             _sync_in_progress = False
+
+
+def _sync_tracklists(releases: list) -> None:
+    global _tracklist_sync_in_progress
+    _tracklist_sync_in_progress = True
+    try:
+        conn = _plain_db()
+        _ensure_discogs_tables(conn)
+        conn.execute("DELETE FROM discogs_tracks")
+        conn.commit()
+        for r in releases:
+            info       = r.get("basic_information", {})
+            release_id = info.get("id") or r.get("id")
+            if not release_id:
+                continue
+            try:
+                data = _discogs_get(f"https://api.discogs.com/releases/{release_id}", {})
+                for track in data.get("tracklist", []):
+                    t = track.get("title", "").strip()
+                    if t:
+                        conn.execute(
+                            "INSERT INTO discogs_tracks (release_id, title) VALUES (?,?)",
+                            (release_id, t),
+                        )
+                conn.commit()
+            except Exception:
+                pass
+            time.sleep(1)   # stay within Discogs 60 req/min limit
+        conn.close()
+    except Exception as e:
+        app.logger.error("Tracklist sync failed: %s", e)
+    finally:
+        _tracklist_sync_in_progress = False
 
 
 def _maybe_trigger_sync() -> None:
@@ -401,6 +449,7 @@ def api_artist_delete():
 def api_discogs_check():
     artist = request.args.get("artist", "").strip()
     album  = request.args.get("album",  "").strip()
+    title  = request.args.get("title",  "").strip()   # song title for track-level fallback
     if not artist or not album:
         return jsonify({"owned": None, "reason": "no_album"})
     if not DISCOGS_TOKEN or not DISCOGS_USERNAME:
@@ -411,6 +460,8 @@ def api_discogs_check():
     db = get_db()
     try:
         match = _find_in_collection(db, artist, album)
+        if not match and title:
+            match = _find_album_by_track(db, artist, title)
         if match:
             return jsonify({"owned": True, "format": match["format"], "url": match["url"]})
         count = db.execute("SELECT COUNT(*) FROM discogs_collection").fetchone()[0]
@@ -424,19 +475,24 @@ def api_discogs_check():
 @app.route("/api/discogs/status")
 def api_discogs_status():
     if not DISCOGS_TOKEN or not DISCOGS_USERNAME:
-        return jsonify({"configured": False, "syncing": False, "last_sync": None, "count": 0})
+        return jsonify({"configured": False, "syncing": False, "last_sync": None, "count": 0,
+                        "tracklist_syncing": False, "tracklist_count": 0})
     db = get_db()
     try:
-        row   = db.execute("SELECT value FROM discogs_meta WHERE key='last_sync'").fetchone()
-        count = db.execute("SELECT COUNT(*) FROM discogs_collection").fetchone()[0]
+        row            = db.execute("SELECT value FROM discogs_meta WHERE key='last_sync'").fetchone()
+        count          = db.execute("SELECT COUNT(*) FROM discogs_collection").fetchone()[0]
+        tracklist_count = db.execute("SELECT COUNT(*) FROM discogs_tracks").fetchone()[0]
         return jsonify({
-            "configured": True,
-            "syncing":    _sync_in_progress,
-            "last_sync":  row[0] if row else None,
-            "count":      count,
+            "configured":        True,
+            "syncing":           _sync_in_progress,
+            "last_sync":         row[0] if row else None,
+            "count":             count,
+            "tracklist_syncing": _tracklist_sync_in_progress,
+            "tracklist_count":   tracklist_count,
         })
     except Exception:
-        return jsonify({"configured": True, "syncing": _sync_in_progress, "last_sync": None, "count": 0})
+        return jsonify({"configured": True, "syncing": _sync_in_progress, "last_sync": None,
+                        "count": 0, "tracklist_syncing": _tracklist_sync_in_progress, "tracklist_count": 0})
 
 
 @app.route("/api/discogs/sync", methods=["POST"])

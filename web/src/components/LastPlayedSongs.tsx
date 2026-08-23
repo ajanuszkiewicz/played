@@ -90,20 +90,20 @@ export function LastPlayedSongs({ latestId, ratingPatch }: Props) {
 
   // Fetch Discogs for any newly loaded songs that have an album
   useEffect(() => {
-    const toFetch: Array<{ artist: string; album: string; key: string }> = []
+    const toFetch: Array<{ artist: string; album: string; title: string; key: string }> = []
     songs.forEach(song => {
       if (!song.album) return
       const key = `${song.artist}::${song.album}`
       if (!fetchedKeysRef.current.has(key)) {
         fetchedKeysRef.current.add(key)
-        toFetch.push({ artist: song.artist, album: song.album, key })
+        toFetch.push({ artist: song.artist, album: song.album, title: song.title, key })
       }
     })
     if (toFetch.length === 0) return
     ;(async () => {
-      for (const { artist, album, key } of toFetch) {
+      for (const { artist, album, title, key } of toFetch) {
         try {
-          const r = await fetch('/api/discogs/check?' + new URLSearchParams({ artist, album }))
+          const r = await fetch('/api/discogs/check?' + new URLSearchParams({ artist, album, title }))
           const d = await r.json()
           setDiscogsCache(prev => ({ ...prev, [key]: d }))
         } catch { /* non-fatal */ }

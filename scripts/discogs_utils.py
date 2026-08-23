@@ -68,30 +68,85 @@ def find_in_collection(db: sqlite3.Connection, artist: str, album: str) -> dict 
     return None
 
 
+def find_album_by_track(db: sqlite3.Connection, artist: str, track_title: str) -> dict | None:
+    """
+    Return the collection album that contains a track matching track_title for
+    the given artist. Falls back to a normalized (punctuation-stripped) match.
+    Returns None if discogs_tracks is empty or not yet populated.
+    """
+    try:
+        # Exact case-insensitive match
+        rows = db.execute("""
+            SELECT c.artist, c.title, c.format, c.url
+            FROM   discogs_tracks t
+            JOIN   discogs_collection c ON c.release_id = t.release_id
+            WHERE  LOWER(c.artist) = LOWER(?)
+              AND  LOWER(t.title)  = LOWER(?)
+        """, (artist, track_title)).fetchall()
+        if rows:
+            return dict(rows[0])
+
+        # Normalized fallback — handles punctuation / whitespace differences
+        norm = normalize_album(track_title)
+        if not norm:
+            return None
+
+        rows = db.execute("""
+            SELECT c.artist, c.title, c.format, c.url, t.title AS track_title
+            FROM   discogs_tracks t
+            JOIN   discogs_collection c ON c.release_id = t.release_id
+            WHERE  LOWER(c.artist) = LOWER(?)
+        """, (artist,)).fetchall()
+
+        for r in rows:
+            if normalize_album(r["track_title"]) == norm:
+                return {"artist": r["artist"], "title": r["title"],
+                        "format": r["format"], "url": r["url"]}
+
+        return None
+    except sqlite3.OperationalError:
+        return None  # table may not exist yet
+
+
 def normalize_songs(db: sqlite3.Connection) -> int:
     """
-    Update all songs in the DB whose album fuzzy-matches a Discogs collection entry,
-    replacing the Shazam-sourced artist/album names with the canonical Discogs names.
+    Update all songs in the DB to use canonical Discogs artist/album naming.
+    For each song, tries album-level matching first, then track-level as fallback.
     Returns the number of rows updated.
     """
     try:
-        combos = db.execute(
-            "SELECT DISTINCT artist, album FROM songs WHERE album IS NOT NULL"
+        rows = db.execute(
+            "SELECT DISTINCT artist, album, title FROM songs WHERE album IS NOT NULL"
         ).fetchall()
     except sqlite3.OperationalError:
         return 0
 
+    # Cache album-level results to avoid repeating the same lookup per album
+    album_cache: dict = {}
     updated = 0
-    for row in combos:
-        match = find_in_collection(db, row["artist"], row["album"])
+
+    for row in rows:
+        key = (row["artist"], row["album"])
+        if key not in album_cache:
+            album_cache[key] = find_in_collection(db, row["artist"], row["album"])
+
+        match = album_cache[key]
+
+        # Fall back to track-level lookup using the song title
+        if not match:
+            match = find_album_by_track(db, row["artist"], row["title"])
+
         if not match:
             continue
+
         d_artist = match["artist"]
         d_album  = match["title"]
+
         if d_artist != row["artist"] or d_album != row["album"]:
             db.execute(
-                "UPDATE songs SET artist = ?, album = ? WHERE artist = ? AND album = ?",
-                (d_artist, d_album, row["artist"], row["album"]),
+                "UPDATE songs SET artist = ?, album = ? "
+                "WHERE artist = ? AND album = ? AND title = ?",
+                (d_artist, d_album, row["artist"], row["album"], row["title"]),
             )
             updated += 1
 

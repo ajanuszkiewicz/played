@@ -97,7 +97,7 @@ export default function App() {
     if (demo) { setDiscogs(DEMO_DISCOGS); return }
     setDiscogs(null)
     if (!currentSong?.album) return
-    const params = new URLSearchParams({ artist: currentSong.artist, album: currentSong.album })
+    const params = new URLSearchParams({ artist: currentSong.artist, album: currentSong.album, title: currentSong.title })
     fetch('/api/discogs/check?' + params)
       .then(r => r.json())
       .then(d => setDiscogs(d))
