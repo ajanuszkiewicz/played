@@ -173,18 +173,18 @@ export default function App() {
           />
         </div>
 
-        {/* System stats */}
-        <div className="mb-6">
-          <SystemStats stats={sysStats} />
-        </div>
-
         {/* Activity chart */}
         <div className="mb-6">
           <ActivityChart data={stats?.hourly_24h ?? []} />
         </div>
 
         {/* Top artists */}
-        <TopArtists />
+        <div className="mb-6">
+          <TopArtists />
+        </div>
+
+        {/* System stats */}
+        <SystemStats stats={sysStats} />
 
       </div>
     </div>
