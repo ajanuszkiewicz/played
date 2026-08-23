@@ -54,7 +54,7 @@ function syncedAgo(iso: string): string {
 export function CurrentlyPlaying({ song, lastSong, onRate, discogs, discogsStatus, onDiscogsSync }: Props) {
   if (!song) {
     return (
-      <div className="bg-gray-800/50 backdrop-blur-sm border border-gray-700/50 rounded-2xl p-8 flex flex-col items-center justify-center min-h-[400px] gap-4">
+      <div className="bg-gray-800/50 backdrop-blur-sm border border-gray-700/50 rounded-2xl p-8 flex flex-col items-center justify-center min-h-[400px] h-full gap-4">
         <div className="text-center text-gray-500">
           <Music className="mx-auto mb-3" size={56} strokeWidth={1.5} />
           <p className="text-sm">Nothing playing</p>
@@ -74,7 +74,7 @@ export function CurrentlyPlaying({ song, lastSong, onRate, discogs, discogsStatu
   }
 
   return (
-    <div className="bg-gray-800/50 backdrop-blur-sm border border-gray-700/50 rounded-2xl p-6 hover:border-gray-600/50 transition-colors">
+    <div className="bg-gray-800/50 backdrop-blur-sm border border-gray-700/50 rounded-2xl p-6 h-full hover:border-gray-600/50 transition-colors">
       <p className="text-xs text-emerald-400 mb-4 flex items-center gap-2">
         <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse inline-block" />
         Now Playing
