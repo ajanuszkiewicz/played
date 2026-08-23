@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Clock, Search, Trash2 } from 'lucide-react'
+import { Clock, Disc3, Search, Trash2 } from 'lucide-react'
 import { toUTC } from '../App'
 import { StarRating } from './StarRating'
 import type { Song } from '../types'
+
+type DiscogsEntry = { owned: boolean | null; url?: string | null }
 
 const LIMIT = 20
 
@@ -34,6 +36,9 @@ export function LastPlayedSongs({ latestId, ratingPatch }: Props) {
 
   const [pendingDelete, setPendingDelete] = useState<number | null>(null)
   const pendingDeleteTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const [discogsCache, setDiscogsCache] = useState<Record<string, DiscogsEntry>>({})
+  const fetchedKeysRef = useRef<Set<string>>(new Set())
 
   const handleTrash = useCallback(async (song: Song) => {
     if (pendingDelete === song.id) {
@@ -82,6 +87,29 @@ export function LastPlayedSongs({ latestId, ratingPatch }: Props) {
       load(1, val, false)
     }, 350)
   }
+
+  // Fetch Discogs for any newly loaded songs that have an album
+  useEffect(() => {
+    const toFetch: Array<{ artist: string; album: string; key: string }> = []
+    songs.forEach(song => {
+      if (!song.album) return
+      const key = `${song.artist}::${song.album}`
+      if (!fetchedKeysRef.current.has(key)) {
+        fetchedKeysRef.current.add(key)
+        toFetch.push({ artist: song.artist, album: song.album, key })
+      }
+    })
+    if (toFetch.length === 0) return
+    ;(async () => {
+      for (const { artist, album, key } of toFetch) {
+        try {
+          const r = await fetch('/api/discogs/check?' + new URLSearchParams({ artist, album }))
+          const d = await r.json()
+          setDiscogsCache(prev => ({ ...prev, [key]: d }))
+        } catch { /* non-fatal */ }
+      }
+    })()
+  }, [songs])
 
   // Initial load
   useEffect(() => { load(1, '', false) }, [load])
@@ -160,10 +188,20 @@ export function LastPlayedSongs({ latestId, ratingPatch }: Props) {
                     <span className="text-white group-hover:text-blue-400 transition-colors truncate">{song.artist}</span>
                     <span className="text-gray-600">·</span>
                     <span className="text-gray-300 truncate">{song.title}</span>
-                    {song.album && <>
-                      <span className="text-gray-600">·</span>
-                      <span className="text-gray-500 text-xs truncate">{song.album}</span>
-                    </>}
+                    {song.album && (() => {
+                      const dc = discogsCache[`${song.artist}::${song.album}`]
+                      return <>
+                        <span className="text-gray-600">·</span>
+                        {dc?.owned && dc?.url ? (
+                          <a href={dc.url} target="_blank" rel="noopener noreferrer"
+                            className="text-xs truncate text-emerald-500 hover:text-emerald-400 transition-colors flex items-center gap-0.5">
+                            {song.album}<Disc3 size={10} />
+                          </a>
+                        ) : (
+                          <span className="text-gray-500 text-xs truncate">{song.album}</span>
+                        )}
+                      </>
+                    })()}
                   </div>
                   <div className="shrink-0 flex items-center gap-2">
                     <div className="opacity-0 group-hover:opacity-100 transition-opacity" style={{ opacity: song.rating != null ? 1 : undefined }}>

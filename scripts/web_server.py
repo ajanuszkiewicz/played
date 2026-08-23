@@ -4,9 +4,14 @@ Song Tracker Web Server
 Serves the dashboard and a JSON REST API over the local network.
 """
 
+import json
 import os
+import re
 import struct
 import sqlite3
+import threading
+import urllib.parse
+import urllib.request
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -16,10 +21,136 @@ DB_PATH       = os.getenv("DB_PATH", "/var/lib/song-tracker/songs.db")
 HOST          = os.getenv("WEB_HOST", "0.0.0.0")
 PORT          = int(os.getenv("WEB_PORT", "8080"))
 AUDIO_FIFO    = os.getenv("AUDIO_FIFO", "/var/lib/song-tracker/audio.fifo")
-TRIGGER_FILE  = os.getenv("TRIGGER_FILE", "/var/lib/song-tracker/manual_trigger")
-WEB_DIR       = Path(__file__).parent / "web"
+TRIGGER_FILE     = os.getenv("TRIGGER_FILE", "/var/lib/song-tracker/manual_trigger")
+DISCOGS_TOKEN    = os.getenv("DISCOGS_TOKEN", "")
+DISCOGS_USERNAME = os.getenv("DISCOGS_USERNAME", "")
+WEB_DIR          = Path(__file__).parent / "web"
+
+_sync_lock       = threading.Lock()
+_sync_in_progress = False
+_setup_done      = False
+_setup_lock      = threading.Lock()
+
+
+def _discogs_get(url: str, params: dict) -> dict:
+    full_url = url + "?" + urllib.parse.urlencode(params)
+    req = urllib.request.Request(full_url, headers={
+        "Authorization": f"Discogs token={DISCOGS_TOKEN}",
+        "User-Agent": "SongTracker/1.0",
+    })
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return json.loads(resp.read())
+
+
+def _plain_db() -> sqlite3.Connection:
+    """Open a thread-safe DB connection outside Flask's request context."""
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _ensure_discogs_tables(conn: sqlite3.Connection) -> None:
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS discogs_collection (
+            release_id INTEGER PRIMARY KEY,
+            artist     TEXT NOT NULL,
+            title      TEXT NOT NULL,
+            format     TEXT,
+            url        TEXT
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS discogs_meta (
+            key   TEXT PRIMARY KEY,
+            value TEXT
+        )
+    """)
+    conn.commit()
+
+
+def _sync_discogs_collection() -> None:
+    global _sync_in_progress
+    with _sync_lock:
+        if _sync_in_progress:
+            return
+        _sync_in_progress = True
+    try:
+        page, all_releases = 1, []
+        while True:
+            data = _discogs_get(
+                f"https://api.discogs.com/users/{DISCOGS_USERNAME}/collection/folders/0/releases",
+                {"per_page": 100, "page": page},
+            )
+            all_releases.extend(data.get("releases", []))
+            if page >= data.get("pagination", {}).get("pages", 1):
+                break
+            page += 1
+
+        conn = _plain_db()
+        _ensure_discogs_tables(conn)
+        conn.execute("DELETE FROM discogs_collection")
+        for r in all_releases:
+            info       = r.get("basic_information", {})
+            release_id = info.get("id") or r.get("id")
+            artists    = info.get("artists", [])
+            # Strip Discogs disambiguation suffixes like "Artist (2)"
+            artist = re.sub(r"\s*\(\d+\)$", "", artists[0].get("name", "")).strip() if artists else ""
+            title  = info.get("title", "").strip()
+            fmts   = info.get("formats", [])
+            fmt_parts = []
+            for f in fmts:
+                descs = f.get("descriptions", [])
+                fmt_parts.append(f"{f.get('name', '')}, {', '.join(descs)}" if descs else f.get("name", ""))
+            fmt = " / ".join(p for p in fmt_parts if p).strip() or None
+            url = f"https://www.discogs.com/release/{release_id}" if release_id else None
+            if release_id and artist and title:
+                conn.execute(
+                    "INSERT OR REPLACE INTO discogs_collection (release_id, artist, title, format, url) VALUES (?,?,?,?,?)",
+                    (release_id, artist, title, fmt, url),
+                )
+        conn.execute(
+            "INSERT OR REPLACE INTO discogs_meta (key, value) VALUES ('last_sync', ?)",
+            (datetime.utcnow().isoformat(timespec="seconds") + "Z",),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        app.logger.error("Discogs sync failed: %s", e)
+    finally:
+        with _sync_lock:
+            _sync_in_progress = False
+
+
+def _maybe_trigger_sync() -> None:
+    """Start a background sync if collection is stale (>24 h) or never fetched."""
+    if not DISCOGS_TOKEN or not DISCOGS_USERNAME:
+        return
+    try:
+        conn = _plain_db()
+        _ensure_discogs_tables(conn)
+        row = conn.execute("SELECT value FROM discogs_meta WHERE key='last_sync'").fetchone()
+        conn.close()
+        if row:
+            last = datetime.fromisoformat(row[0].rstrip("Z"))
+            if (datetime.utcnow() - last).total_seconds() < 86400:
+                return
+    except Exception:
+        pass
+    threading.Thread(target=_sync_discogs_collection, daemon=True).start()
 
 app = Flask(__name__, static_folder=str(WEB_DIR))
+
+
+@app.before_request
+def _setup_once():
+    global _setup_done
+    if _setup_done:
+        return
+    with _setup_lock:
+        if _setup_done:
+            return
+        _setup_done = True
+    _maybe_trigger_sync()
 
 
 # ── DB helper ──────────────────────────────────────────────────────────────────
@@ -199,6 +330,59 @@ def api_artist_delete():
     db.execute("DELETE FROM songs WHERE artist = ?", (artist,))
     db.commit()
     return jsonify({"ok": True})
+
+
+@app.route("/api/discogs/check")
+def api_discogs_check():
+    artist = request.args.get("artist", "").strip()
+    album  = request.args.get("album",  "").strip()
+    if not artist or not album:
+        return jsonify({"owned": None, "reason": "no_album"})
+    if not DISCOGS_TOKEN or not DISCOGS_USERNAME:
+        return jsonify({"owned": None, "reason": "not_configured"})
+
+    _maybe_trigger_sync()
+
+    db = get_db()
+    try:
+        row = db.execute(
+            "SELECT format, url FROM discogs_collection WHERE LOWER(artist)=LOWER(?) AND LOWER(title)=LOWER(?)",
+            (artist, album),
+        ).fetchone()
+        if row:
+            return jsonify({"owned": True, "format": row["format"], "url": row["url"]})
+        count = db.execute("SELECT COUNT(*) FROM discogs_collection").fetchone()[0]
+        if count == 0:
+            return jsonify({"owned": None, "reason": "syncing"})
+        return jsonify({"owned": False, "format": None, "url": None})
+    except Exception as e:
+        return jsonify({"owned": None, "reason": f"error: {e}"})
+
+
+@app.route("/api/discogs/status")
+def api_discogs_status():
+    if not DISCOGS_TOKEN or not DISCOGS_USERNAME:
+        return jsonify({"configured": False, "syncing": False, "last_sync": None, "count": 0})
+    db = get_db()
+    try:
+        row   = db.execute("SELECT value FROM discogs_meta WHERE key='last_sync'").fetchone()
+        count = db.execute("SELECT COUNT(*) FROM discogs_collection").fetchone()[0]
+        return jsonify({
+            "configured": True,
+            "syncing":    _sync_in_progress,
+            "last_sync":  row[0] if row else None,
+            "count":      count,
+        })
+    except Exception:
+        return jsonify({"configured": True, "syncing": _sync_in_progress, "last_sync": None, "count": 0})
+
+
+@app.route("/api/discogs/sync", methods=["POST"])
+def api_discogs_sync():
+    if not DISCOGS_TOKEN or not DISCOGS_USERNAME:
+        return jsonify({"error": "not_configured"}), 400
+    threading.Thread(target=_sync_discogs_collection, daemon=True).start()
+    return jsonify({"ok": True, "syncing": True})
 
 
 @app.route("/api/trigger", methods=["POST"])

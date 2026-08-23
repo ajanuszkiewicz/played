@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -e
-PI=adamj@192.168.0.234
+PI=adamj@platipi.local
 
 echo "==> Building web UI..."
 cd web
@@ -22,13 +22,15 @@ rsync -av \
   --exclude='web/index.html' \
   ./ $PI:/home/adamj/rpi-song-tracker/
 
+read -r -p "==> Overwrite /etc/song-tracker/env on the Pi with env.example? [y/N] " overwrite_env
+
 echo "==> Deploying on Pi..."
 ssh $PI "
   sudo cp ~/rpi-song-tracker/scripts/*.py /usr/local/bin/song-tracker/ &&
   sudo chmod 644 /usr/local/bin/song-tracker/*.py &&
   sudo cp -r ~/rpi-song-tracker/web/dist/. /usr/local/bin/song-tracker/web/ &&
   sudo chmod -R 755 /usr/local/bin/song-tracker/web/ &&
-  sudo cp ~/rpi-song-tracker/env.example /etc/song-tracker/env &&
+  $([ "$overwrite_env" = "y" ] || [ "$overwrite_env" = "Y" ] && echo 'sudo cp ~/rpi-song-tracker/env.example /etc/song-tracker/env &&' || echo '') \
   sudo cp ~/rpi-song-tracker/config/asound.conf /etc/asound.conf &&
   sudo systemctl restart song-tracker song-tracker-web &&
   echo 'Deploy complete'
