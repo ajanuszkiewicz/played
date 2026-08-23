@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { ChevronRight, ChevronLeft, Users, Disc3, Music, Trash2 } from 'lucide-react'
 import { StarDisplay } from './StarRating'
 import type { ArtistSummary, ArtistDetail } from '../types'
@@ -26,6 +26,8 @@ export function TopArtists() {
   const [selected, setSelected] = useState<ArtistSummary | null>(null)
   const [detail, setDetail] = useState<ArtistDetail | null>(null)
   const [loadingDetail, setLoadingDetail] = useState(false)
+  const [ownedAlbums, setOwnedAlbums] = useState<Record<string, boolean>>({})
+  const fetchedAlbumsRef = useRef<Set<string>>(new Set())
 
   useEffect(() => {
     const since = sinceISO(dateFilter)
@@ -40,9 +42,31 @@ export function TopArtists() {
   const pageArtists = artists.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
   const globalOffset = (page - 1) * PAGE_SIZE
 
+  useEffect(() => {
+    if (!detail || !selected) return
+    const toFetch = detail.albums.filter(album => {
+      const key = `${selected.artist}::${album}`
+      if (fetchedAlbumsRef.current.has(key)) return false
+      fetchedAlbumsRef.current.add(key)
+      return true
+    })
+    if (toFetch.length === 0) return
+    ;(async () => {
+      for (const album of toFetch) {
+        try {
+          const r = await fetch('/api/discogs/check?' + new URLSearchParams({ artist: selected.artist, album }))
+          const d = await r.json()
+          if (d.owned) setOwnedAlbums(prev => ({ ...prev, [`${selected.artist}::${album}`]: true }))
+        } catch { /* non-fatal */ }
+      }
+    })()
+  }, [detail, selected])
+
   const selectArtist = async (artist: ArtistSummary) => {
     setSelected(artist)
     setDetail(null)
+    setOwnedAlbums({})
+    fetchedAlbumsRef.current = new Set()
     setLoadingDetail(true)
     try {
       const r = await fetch('/api/artists/detail?name=' + encodeURIComponent(artist.artist))
@@ -122,11 +146,15 @@ export function TopArtists() {
                       <p className="text-sm text-gray-300">Albums</p>
                     </div>
                     <ul className="space-y-2">
-                      {detail.albums.map((album, i) => (
-                        <li key={i} className="text-sm text-gray-400 py-2 px-3 bg-gray-700/20 rounded-lg hover:bg-gray-700/40 transition-colors">
-                          {album}
-                        </li>
-                      ))}
+                      {detail.albums.map((album, i) => {
+                        const owned = ownedAlbums[`${selected.artist}::${album}`]
+                        return (
+                          <li key={i} className={`flex items-center justify-between text-sm py-2 px-3 bg-gray-700/20 rounded-lg hover:bg-gray-700/40 transition-colors ${owned ? 'text-emerald-400' : 'text-gray-400'}`}>
+                            <span>{album}</span>
+                            {owned && <Disc3 size={13} className="shrink-0 ml-2" />}
+                          </li>
+                        )
+                      })}
                     </ul>
                   </div>
                 )}
