@@ -1,4 +1,5 @@
-import { Music, Disc3, RefreshCw } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Music, Disc3, RefreshCw, ScrollText } from 'lucide-react'
 import { toUTC } from '../App'
 import { StarRating } from './StarRating'
 
@@ -52,6 +53,29 @@ function syncedAgo(iso: string): string {
 }
 
 export function CurrentlyPlaying({ song, lastSong, onRate, discogs, discogsStatus, onDiscogsSync }: Props) {
+  const [lyricsOpen, setLyricsOpen] = useState(false)
+  const [lyrics, setLyrics] = useState<{ found: boolean; instrumental: boolean; plainLyrics?: string | null } | null>(null)
+  const [lyricsLoading, setLyricsLoading] = useState(false)
+
+  // Reset lyrics when song changes
+  useEffect(() => {
+    setLyricsOpen(false)
+    setLyrics(null)
+  }, [song?.id])
+
+  // Fetch when panel opens
+  useEffect(() => {
+    if (!lyricsOpen || !song || lyrics) return
+    setLyricsLoading(true)
+    const params = new URLSearchParams({ artist: song.artist, title: song.title })
+    if (song.album) params.set('album', song.album)
+    fetch('/api/lyrics?' + params)
+      .then(r => r.json())
+      .then(d => setLyrics(d))
+      .catch(() => setLyrics({ found: false, instrumental: false }))
+      .finally(() => setLyricsLoading(false))
+  }, [lyricsOpen, song?.id])
+
   if (!song) {
     return (
       <div className="bg-gray-800/50 backdrop-blur-sm border border-gray-700/50 rounded-2xl p-8 flex flex-col items-center justify-center min-h-[400px] h-full gap-4">
@@ -129,7 +153,32 @@ export function CurrentlyPlaying({ song, lastSong, onRate, discogs, discogsStatu
         <div className="flex justify-center pt-1">
           <StarRating key={song.id} songId={song.id} initial={song.rating} onRate={r => onRate?.(song.id, r)} />
         </div>
+        <div className="flex justify-center pt-2">
+          <button
+            onClick={() => setLyricsOpen(o => !o)}
+            className={`flex items-center gap-1.5 text-xs transition-colors ${lyricsOpen ? 'text-amber-400' : 'text-gray-600 hover:text-gray-400'}`}
+          >
+            <ScrollText size={12} />
+            Lyrics
+          </button>
+        </div>
       </div>
+
+      {lyricsOpen && (
+        <div className="mt-4 pt-4 border-t border-gray-700/50">
+          {lyricsLoading ? (
+            <p className="text-gray-600 text-xs text-center py-2">Loading…</p>
+          ) : lyrics?.instrumental ? (
+            <p className="text-gray-600 text-xs text-center py-2">Instrumental track</p>
+          ) : lyrics?.found && lyrics.plainLyrics ? (
+            <div className="max-h-56 overflow-y-auto scrollbar-thin">
+              <p className="text-gray-400 text-xs leading-relaxed whitespace-pre-line">{lyrics.plainLyrics}</p>
+            </div>
+          ) : (
+            <p className="text-gray-600 text-xs text-center py-2">No lyrics found</p>
+          )}
+        </div>
+      )}
     </div>
   )
 }

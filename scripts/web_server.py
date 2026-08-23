@@ -43,6 +43,7 @@ _setup_lock              = threading.Lock()
 
 _location_cache: tuple | None = None   # (lat, lon, city)
 _rec_cache: dict = {}                  # cache_key -> {data, ts}
+_lyrics_cache: dict = {}               # "artist::title::album" -> response dict
 REC_CACHE_TTL = 1800  # seconds
 
 
@@ -508,6 +509,46 @@ def api_discogs_normalize():
     db      = get_db()
     updated = _normalize_songs(db)
     return jsonify({"ok": True, "updated": updated})
+
+
+@app.route("/api/lyrics")
+def api_lyrics():
+    artist = request.args.get("artist", "").strip()
+    title  = request.args.get("title",  "").strip()
+    album  = request.args.get("album",  "").strip()
+    if not artist or not title:
+        return jsonify({"error": "missing params"}), 400
+
+    cache_key = f"{artist}::{title}::{album}"
+    if cache_key in _lyrics_cache:
+        return jsonify(_lyrics_cache[cache_key])
+
+    params = {"artist_name": artist, "track_name": title}
+    if album:
+        params["album_name"] = album
+    url = "https://lrclib.net/api/get?" + urllib.parse.urlencode(params)
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "SongTracker/1.0 (https://github.com/ajanuszkiewicz/played)"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+        result = {
+            "found": True,
+            "instrumental": data.get("instrumental", False),
+            "plainLyrics": data.get("plainLyrics"),
+        }
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            result = {"found": False, "instrumental": False, "plainLyrics": None}
+        else:
+            return jsonify({"error": f"lrclib {e.code}"}), 502
+    except Exception as e:
+        return jsonify({"error": str(e)}), 502
+
+    _lyrics_cache[cache_key] = result
+    return jsonify(result)
 
 
 @app.route("/api/recommendations")
