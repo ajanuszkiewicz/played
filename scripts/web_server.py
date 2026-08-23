@@ -36,7 +36,7 @@ _setup_done       = False
 _setup_lock       = threading.Lock()
 
 _location_cache: tuple | None = None   # (lat, lon, city)
-_rec_cache: dict = {"data": None, "ts": 0.0}
+_rec_cache: dict = {}                  # cache_key -> {data, ts}
 REC_CACHE_TTL = 1800  # seconds
 
 
@@ -452,10 +452,16 @@ def api_recommendations():
     if not ANTHROPIC_API_KEY:
         return jsonify({"error": "not_configured"}), 400
 
-    force  = request.args.get("refresh") == "1"
-    now_ts = time.time()
-    if not force and _rec_cache["data"] and (now_ts - _rec_cache["ts"]) < REC_CACHE_TTL:
-        return jsonify(_rec_cache["data"])
+    current_artist = request.args.get("current_artist", "").strip()
+    current_album  = request.args.get("current_album",  "").strip()
+    force          = request.args.get("refresh") == "1"
+    now_ts         = time.time()
+    cache_key      = f"{current_artist}::{current_album}" if current_artist else "__none__"
+
+    if not force and cache_key in _rec_cache:
+        cached = _rec_cache[cache_key]
+        if (now_ts - cached["ts"]) < REC_CACHE_TTL:
+            return jsonify(cached["data"])
 
     db = get_db()
     try:
@@ -494,6 +500,11 @@ def api_recommendations():
         city_part   = f" in {weather['city']}" if weather.get("city") else ""
         weather_ctx = f"\n- Weather{city_part}: {weather['temp_c']}°C, {weather['condition']}"
 
+    if current_artist and current_album:
+        playing_ctx = f"\n\nThe user is currently listening to {current_artist} — {current_album}. Suggest 4 albums from the list that would make a great follow-on listen, considering the mood and feel of that album alongside the time, season, and weather."
+    else:
+        playing_ctx = "\n\nRecommend exactly 4 albums from the list above that best suit this specific moment."
+
     prompt = f"""You are a music recommendation assistant helping someone decide what to play from their vinyl/music collection.
 
 Current context:
@@ -501,9 +512,7 @@ Current context:
 - Season: {season}{weather_ctx}
 
 A sample of records from their collection:
-{collection}
-
-Recommend exactly 4 albums from the list above that best suit this specific moment. Let the time of day, season, and weather genuinely shape your choices — a rainy evening calls for something different from a sunny afternoon. Only recommend albums explicitly listed above.
+{collection}{playing_ctx} Let the time of day, season, and weather genuinely shape your choices. Only recommend albums explicitly listed above.
 
 Respond with JSON only, no markdown fences, no explanation outside the JSON:
 {{"mood": "2-5 word mood phrase", "recommendations": [{{"artist": "...", "album": "...", "reason": "one vivid sentence on why this fits right now"}}]}}"""
@@ -533,8 +542,7 @@ Respond with JSON only, no markdown fences, no explanation outside the JSON:
             text  = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
 
         data = json.loads(text)
-        _rec_cache["data"] = data
-        _rec_cache["ts"]   = now_ts
+        _rec_cache[cache_key] = {"data": data, "ts": now_ts}
         return jsonify(data)
 
     except Exception as e:

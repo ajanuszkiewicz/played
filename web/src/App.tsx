@@ -157,12 +157,10 @@ export default function App() {
           </div>
         </div>
 
-        {/* Recommendations — shown only when nothing is currently playing */}
-        {!currentSong && (
-          <div className="mb-6">
-            <Recommendations />
-          </div>
-        )}
+        {/* Recommendations */}
+        <div className="mb-6">
+          <Recommendations currentSong={currentSong} />
+        </div>
 
         {/* General stats */}
         <div className="mb-6">

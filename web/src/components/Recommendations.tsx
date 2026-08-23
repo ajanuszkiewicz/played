@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useCallback } from 'react'
 import { Sparkles, RefreshCw } from 'lucide-react'
 
 interface Rec {
@@ -12,16 +12,26 @@ interface RecData {
   recommendations: Rec[]
 }
 
-export function Recommendations() {
+interface Props {
+  currentSong?: { artist: string; album: string | null } | null
+}
+
+export function Recommendations({ currentSong }: Props) {
   const [data, setData] = useState<RecData | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(async (refresh = false) => {
     setLoading(true)
     setError(null)
     try {
-      const r = await fetch('/api/recommendations' + (refresh ? '?refresh=1' : ''))
+      const params = new URLSearchParams()
+      if (refresh) params.set('refresh', '1')
+      if (currentSong?.album) {
+        params.set('current_artist', currentSong.artist)
+        params.set('current_album', currentSong.album)
+      }
+      const r = await fetch('/api/recommendations?' + params)
       const d = await r.json()
       if (d.error) throw new Error(d.error)
       setData(d)
@@ -30,9 +40,23 @@ export function Recommendations() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [currentSong?.artist, currentSong?.album])
 
-  useEffect(() => { load() }, [load])
+  const promptLabel = currentSong?.album ? 'What should I play next?' : 'Suggest something to play'
+
+  if (!data && !loading && !error) {
+    return (
+      <div className="bg-gray-800/50 backdrop-blur-sm border border-gray-700/50 rounded-2xl p-6 flex items-center justify-center min-h-[80px]">
+        <button
+          onClick={() => load()}
+          className="flex items-center gap-2 text-gray-500 hover:text-amber-400 transition-colors"
+        >
+          <Sparkles size={16} strokeWidth={2} />
+          <span className="text-sm">{promptLabel}</span>
+        </button>
+      </div>
+    )
+  }
 
   return (
     <div className="bg-gray-800/50 backdrop-blur-sm border border-gray-700/50 rounded-2xl p-6">
