@@ -143,7 +143,7 @@ export default function App() {
               <Zap size={16} className={triggerState === 'loading' ? 'animate-pulse' : ''} />
               <span>{triggerState === 'done' ? 'Scanning…' : 'Identify Now'}</span>
             </button>
-            <ListenButton />
+            {/* <ListenButton /> */}
           </div>
         </div>
 
