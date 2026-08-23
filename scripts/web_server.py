@@ -517,9 +517,10 @@ def api_recommendations():
 
     current_artist = request.args.get("current_artist", "").strip()
     current_album  = request.args.get("current_album",  "").strip()
+    custom_prompt  = request.args.get("custom_prompt",  "").strip()
     force          = request.args.get("refresh") == "1"
     now_ts         = time.time()
-    cache_key      = f"{current_artist}::{current_album}" if current_artist else "__none__"
+    cache_key      = f"{current_artist}::{current_album}::{custom_prompt}" if (current_artist or custom_prompt) else "__none__"
 
     if not force and cache_key in _rec_cache:
         cached = _rec_cache[cache_key]
@@ -563,7 +564,12 @@ def api_recommendations():
         city_part   = f" in {weather['city']}" if weather.get("city") else ""
         weather_ctx = f"\n- Weather{city_part}: {weather['temp_c']}°C, {weather['condition']}"
 
-    if current_artist and current_album:
+    if custom_prompt:
+        playing_ctx = f"\n\nThe user is asking: \"{custom_prompt}\"."
+        if current_artist and current_album:
+            playing_ctx += f" They are currently listening to {current_artist} — {current_album}."
+        playing_ctx += " Suggest exactly 4 albums from the list that best answer their request, also considering the time, season, and weather."
+    elif current_artist and current_album:
         playing_ctx = f"\n\nThe user is currently listening to {current_artist} — {current_album}. Suggest 4 albums from the list that would make a great follow-on listen, considering the mood and feel of that album alongside the time, season, and weather."
     else:
         playing_ctx = "\n\nRecommend exactly 4 albums from the list above that best suit this specific moment."
