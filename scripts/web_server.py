@@ -10,6 +10,7 @@ import re
 import struct
 import sqlite3
 import threading
+import time
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta
@@ -22,14 +23,75 @@ HOST          = os.getenv("WEB_HOST", "0.0.0.0")
 PORT          = int(os.getenv("WEB_PORT", "8080"))
 AUDIO_FIFO    = os.getenv("AUDIO_FIFO", "/var/lib/song-tracker/audio.fifo")
 TRIGGER_FILE     = os.getenv("TRIGGER_FILE", "/var/lib/song-tracker/manual_trigger")
-DISCOGS_TOKEN    = os.getenv("DISCOGS_TOKEN", "")
-DISCOGS_USERNAME = os.getenv("DISCOGS_USERNAME", "")
-WEB_DIR          = Path(__file__).parent / "web"
+DISCOGS_TOKEN     = os.getenv("DISCOGS_TOKEN", "")
+DISCOGS_USERNAME  = os.getenv("DISCOGS_USERNAME", "")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+LATITUDE          = os.getenv("LATITUDE",  "").strip()
+LONGITUDE         = os.getenv("LONGITUDE", "").strip()
+WEB_DIR           = Path(__file__).parent / "web"
 
-_sync_lock       = threading.Lock()
+_sync_lock        = threading.Lock()
 _sync_in_progress = False
-_setup_done      = False
-_setup_lock      = threading.Lock()
+_setup_done       = False
+_setup_lock       = threading.Lock()
+
+_location_cache: tuple | None = None   # (lat, lon, city)
+_rec_cache: dict = {"data": None, "ts": 0.0}
+REC_CACHE_TTL = 1800  # seconds
+
+
+def _weather_code_desc(code: int) -> str:
+    if code == 0:      return "clear sky"
+    if code <= 3:      return "partly cloudy"
+    if code <= 48:     return "foggy"
+    if code <= 57:     return "drizzle"
+    if code <= 67:     return "rain"
+    if code <= 77:     return "snow"
+    if code <= 82:     return "showers"
+    if code <= 86:     return "snow showers"
+    if code >= 95:     return "thunderstorm"
+    return "cloudy"
+
+
+def _get_location() -> tuple | None:
+    global _location_cache
+    if _location_cache is not None:
+        return _location_cache
+    if LATITUDE and LONGITUDE:
+        _location_cache = (float(LATITUDE), float(LONGITUDE), None)
+        return _location_cache
+    try:
+        req = urllib.request.Request(
+            "https://ipapi.co/json/",
+            headers={"User-Agent": "SongTracker/1.0"},
+        )
+        data = json.loads(urllib.request.urlopen(req, timeout=5).read())
+        _location_cache = (data["latitude"], data["longitude"], data.get("city"))
+        return _location_cache
+    except Exception:
+        return None
+
+
+def _get_weather() -> dict | None:
+    loc = _get_location()
+    if not loc:
+        return None
+    lat, lon, city = loc
+    try:
+        url = (
+            f"https://api.open-meteo.com/v1/forecast"
+            f"?latitude={lat}&longitude={lon}"
+            f"&current=temperature_2m,weather_code"
+        )
+        data = json.loads(urllib.request.urlopen(url, timeout=5).read())
+        cur  = data.get("current", {})
+        return {
+            "temp_c":    cur.get("temperature_2m"),
+            "condition": _weather_code_desc(cur.get("weather_code", 0)),
+            "city":      city,
+        }
+    except Exception:
+        return None
 
 
 def _discogs_get(url: str, params: dict) -> dict:
@@ -383,6 +445,101 @@ def api_discogs_sync():
         return jsonify({"error": "not_configured"}), 400
     threading.Thread(target=_sync_discogs_collection, daemon=True).start()
     return jsonify({"ok": True, "syncing": True})
+
+
+@app.route("/api/recommendations")
+def api_recommendations():
+    if not ANTHROPIC_API_KEY:
+        return jsonify({"error": "not_configured"}), 400
+
+    force  = request.args.get("refresh") == "1"
+    now_ts = time.time()
+    if not force and _rec_cache["data"] and (now_ts - _rec_cache["ts"]) < REC_CACHE_TTL:
+        return jsonify(_rec_cache["data"])
+
+    db = get_db()
+    try:
+        rows = db.execute(
+            "SELECT artist, title FROM discogs_collection ORDER BY RANDOM() LIMIT 50"
+        ).fetchall()
+    except Exception:
+        rows = []
+    if not rows:
+        return jsonify({"error": "no_collection"}), 400
+
+    collection = "\n".join(f"- {r['artist']} — {r['title']}" for r in rows)
+
+    now_dt      = datetime.now()
+    hour        = now_dt.hour
+    hour12      = hour % 12 or 12
+    ampm        = "AM" if hour < 12 else "PM"
+    time_of_day = (
+        "morning"   if 5  <= hour < 12 else
+        "afternoon" if 12 <= hour < 17 else
+        "evening"   if 17 <= hour < 21 else
+        "night"
+    )
+    month  = now_dt.month
+    season = (
+        "winter" if month in (12, 1, 2) else
+        "spring" if month in (3,  4, 5) else
+        "summer" if month in (6,  7, 8) else
+        "autumn"
+    )
+    time_str = now_dt.strftime(f"%A {hour12}:%M {ampm}")
+
+    weather     = _get_weather()
+    weather_ctx = ""
+    if weather:
+        city_part   = f" in {weather['city']}" if weather.get("city") else ""
+        weather_ctx = f"\n- Weather{city_part}: {weather['temp_c']}°C, {weather['condition']}"
+
+    prompt = f"""You are a music recommendation assistant helping someone decide what to play from their vinyl/music collection.
+
+Current context:
+- Time: {time_str} ({time_of_day})
+- Season: {season}{weather_ctx}
+
+A sample of records from their collection:
+{collection}
+
+Recommend exactly 4 albums from the list above that best suit this specific moment. Let the time of day, season, and weather genuinely shape your choices — a rainy evening calls for something different from a sunny afternoon. Only recommend albums explicitly listed above.
+
+Respond with JSON only, no markdown fences, no explanation outside the JSON:
+{{"mood": "2-5 word mood phrase", "recommendations": [{{"artist": "...", "album": "...", "reason": "one vivid sentence on why this fits right now"}}]}}"""
+
+    try:
+        body = json.dumps({
+            "model":      "claude-haiku-4-5-20251001",
+            "max_tokens": 600,
+            "messages":   [{"role": "user", "content": prompt}],
+        }).encode()
+        req = urllib.request.Request(
+            "https://api.anthropic.com/v1/messages",
+            data=body,
+            headers={
+                "x-api-key":         ANTHROPIC_API_KEY,
+                "anthropic-version": "2023-06-01",
+                "content-type":      "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = json.loads(resp.read())
+
+        text = result["content"][0]["text"].strip()
+        if text.startswith("```"):
+            lines = text.splitlines()
+            text  = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
+
+        data = json.loads(text)
+        _rec_cache["data"] = data
+        _rec_cache["ts"]   = now_ts
+        return jsonify(data)
+
+    except Exception as e:
+        app.logger.error("Recommendations failed: %s", e)
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/trigger", methods=["POST"])

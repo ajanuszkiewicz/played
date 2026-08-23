@@ -7,6 +7,7 @@ import { ActivityChart } from './components/ActivityChart'
 import { TopArtists } from './components/TopArtists'
 import { SystemStats } from './components/SystemStats'
 import { ListenButton } from './components/ListenButton'
+import { Recommendations } from './components/Recommendations'
 import type { StatsData, SysStats } from './types'
 
 // played_at is stored as UTC without 'Z' — append it for correct JS parsing
@@ -155,6 +156,13 @@ export default function App() {
             <LastPlayedSongs latestId={stats?.recent[0]?.id ?? null} ratingPatch={ratingPatch} />
           </div>
         </div>
+
+        {/* Recommendations — shown only when nothing is currently playing */}
+        {!currentSong && (
+          <div className="mb-6">
+            <Recommendations />
+          </div>
+        )}
 
         {/* General stats */}
         <div className="mb-6">
