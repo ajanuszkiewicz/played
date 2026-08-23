@@ -21,10 +21,12 @@ export function Recommendations({ currentSong }: Props) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [customPrompt, setCustomPrompt] = useState('')
+  const [promptDimmed, setPromptDimmed] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const load = useCallback(async (refresh = false, prompt = '') => {
     setLoading(true)
+    setPromptDimmed(false)
     setError(null)
     try {
       const params = new URLSearchParams()
@@ -38,6 +40,7 @@ export function Recommendations({ currentSong }: Props) {
       const d = await r.json()
       if (d.error) throw new Error(d.error)
       setData(d)
+      if (prompt.trim()) setPromptDimmed(true)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'unknown')
     } finally {
@@ -59,10 +62,11 @@ export function Recommendations({ currentSong }: Props) {
         ref={inputRef}
         type="text"
         value={customPrompt}
-        onChange={e => setCustomPrompt(e.target.value)}
+        onChange={e => { setPromptDimmed(false); setCustomPrompt(e.target.value) }}
+        onFocus={() => { if (promptDimmed) { setCustomPrompt(''); setPromptDimmed(false) } }}
         onKeyDown={handleKeyDown}
         placeholder={placeholder}
-        className="flex-1 bg-gray-700/30 border border-gray-600/30 rounded-lg px-3 py-1.5 text-sm text-gray-300 placeholder-gray-600 focus:outline-none focus:border-amber-500/40 focus:ring-1 focus:ring-amber-500/20 transition-colors"
+        className={`flex-1 bg-gray-700/30 border border-gray-600/30 rounded-lg px-3 py-1.5 text-sm placeholder-gray-600 focus:outline-none focus:border-amber-500/40 focus:ring-1 focus:ring-amber-500/20 transition-colors ${promptDimmed ? 'text-gray-600' : 'text-gray-300'}`}
       />
       <button
         onClick={handleAsk}
