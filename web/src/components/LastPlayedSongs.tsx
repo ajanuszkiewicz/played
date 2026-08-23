@@ -169,7 +169,7 @@ export function LastPlayedSongs({ latestId, ratingPatch }: Props) {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto space-y-0.5 scrollbar-thin">
+      <div className="flex-1 overflow-y-auto space-y-0.5 max-h-109 scrollbar-thin">
         {songs.length === 0 && loading ? (
           Array(6).fill(null).map((_, i) => (
             <div key={i} className="py-3 px-3 rounded-lg animate-pulse">
