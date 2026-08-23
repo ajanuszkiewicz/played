@@ -101,7 +101,7 @@ export function CurrentlyPlaying({ song, lastSong, onRate, discogs, discogsStatu
             className={`flex items-center justify-center gap-1.5 text-emerald-400 ${discogs.url ? 'hover:text-emerald-300 transition-colors' : 'pointer-events-none'}`}
           >
             <Disc3 size={13} />
-            <span className="text-xs">In Collection{discogs.format ? ` · ${discogs.format}` : ''}</span>
+            <span className="text-xs">In Collection{discogs.format ? ` - ${discogs.format.split(',')[0].trim()}` : ''}</span>
           </a>
         )}
         {discogs?.owned === false && (
