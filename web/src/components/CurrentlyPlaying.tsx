@@ -134,10 +134,15 @@ export function CurrentlyPlaying({ song, lastSong, onRate, discogs, discogsStatu
             </a>
           )}
           {discogs?.owned === false && (
-            <span className="flex items-center justify-center gap-1.5 text-gray-600">
+            <a
+              href={`https://www.discogs.com/search/?q=${encodeURIComponent(`${song.artist} ${song.album}`)}&type=release`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center gap-1.5 text-gray-600 hover:text-gray-400 transition-colors"
+            >
               <Disc3 size={13} />
               <span className="text-xs">Not in Collection</span>
-            </span>
+            </a>
           )}
           {discogsStatus?.configured && (
             <div className="flex items-center justify-center gap-1.5 text-gray-700 text-xs">
