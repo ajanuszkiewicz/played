@@ -21,7 +21,24 @@ def normalize_album(title: str) -> str:
     return re.sub(r'\s+', ' ', t).strip()
 
 
-def find_in_collection(db: sqlite3.Connection, artist: str, album: str) -> dict | None:
+def _pick_by_format(candidates: list, rms: int | None) -> dict:
+    """
+    Given multiple matching rows, use RMS to prefer Vinyl (<1000) or CD (>=1000).
+    Falls back to the first candidate if RMS is unavailable or no format matches.
+    """
+    if rms is None or len(candidates) == 1:
+        return dict(candidates[0])
+    prefer_cd = rms >= 1000
+    for r in candidates:
+        fmt = (r["format"] or "").lower()
+        if prefer_cd and "cd" in fmt:
+            return dict(r)
+        if not prefer_cd and "vinyl" in fmt:
+            return dict(r)
+    return dict(candidates[0])
+
+
+def find_in_collection(db: sqlite3.Connection, artist: str, album: str, rms: int | None = None) -> dict | None:
     """
     Return the best-matching discogs_collection row for the given artist/album,
     or None if no match is found.
@@ -31,6 +48,9 @@ def find_in_collection(db: sqlite3.Connection, artist: str, album: str) -> dict 
       2. Normalized match (ignores edition/remaster suffixes)
       3. Shazam title is a substring of the Discogs title
       4. Discogs title is a substring of the Shazam title
+
+    When multiple format variants exist (e.g. CD and Vinyl), rms is used to
+    pick between them: rms >= 1000 prefers CD, rms < 1000 prefers Vinyl.
     """
     try:
         rows = db.execute(
@@ -46,24 +66,23 @@ def find_in_collection(db: sqlite3.Connection, artist: str, album: str) -> dict 
     al    = album.lower()
     anorm = normalize_album(album)
 
-    for r in rows:
-        if r["title"].lower() == al:
-            return dict(r)
+    candidates = [r for r in rows if r["title"].lower() == al]
+    if candidates:
+        return _pick_by_format(candidates, rms)
 
     if anorm:
-        for r in rows:
-            if normalize_album(r["title"]) == anorm:
-                return dict(r)
+        candidates = [r for r in rows if normalize_album(r["title"]) == anorm]
+        if candidates:
+            return _pick_by_format(candidates, rms)
 
     if len(al) >= 5:
-        for r in rows:
-            if al in r["title"].lower():
-                return dict(r)
+        candidates = [r for r in rows if al in r["title"].lower()]
+        if candidates:
+            return _pick_by_format(candidates, rms)
 
-    for r in rows:
-        tl = r["title"].lower()
-        if len(tl) >= 5 and tl in al:
-            return dict(r)
+    candidates = [r for r in rows if len(r["title"].lower()) >= 5 and r["title"].lower() in al]
+    if candidates:
+        return _pick_by_format(candidates, rms)
 
     return None
 

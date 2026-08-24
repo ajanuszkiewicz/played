@@ -450,6 +450,16 @@ def api_artist_delete():
     return jsonify({"ok": True})
 
 
+def _read_rms() -> int | None:
+    try:
+        p = Path(RMS_FILE)
+        if p.exists() and (time.time() - p.stat().st_mtime) < 10:
+            return int(p.read_text().strip())
+    except (OSError, ValueError):
+        pass
+    return None
+
+
 @app.route("/api/discogs/check")
 def api_discogs_check():
     artist = request.args.get("artist", "").strip()
@@ -462,9 +472,10 @@ def api_discogs_check():
 
     _maybe_trigger_sync()
 
+    rms = _read_rms()
     db = get_db()
     try:
-        match = _find_in_collection(db, artist, album)
+        match = _find_in_collection(db, artist, album, rms=rms)
         if not match and title:
             match = _find_album_by_track(db, artist, title)
         if match:
