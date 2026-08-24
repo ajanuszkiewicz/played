@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react'
 import { Cpu, MemoryStick, Thermometer, HardDrive, Fingerprint, AudioLines } from 'lucide-react'
 import type { SysStats } from '../types'
 
@@ -62,6 +63,16 @@ function RmsCard({ rms, silence, identify }: { rms: number | null; silence: numb
 }
 
 export function SystemStats({ stats: s }: Props) {
+  const [liveRms, setLiveRms] = useState<number | null>(null)
+
+  useEffect(() => {
+    const es = new EventSource('/api/rms/stream')
+    es.onmessage = (e) => setLiveRms(e.data === 'null' ? null : parseInt(e.data, 10))
+    return () => es.close()
+  }, [])
+
+  const rms = liveRms ?? s?.input_rms ?? null
+
   return (
     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
       <StatCard
@@ -104,7 +115,7 @@ export function SystemStats({ stats: s }: Props) {
         icon={<Fingerprint size={18} className="text-sky-400" />}
         color="bg-sky-500"
       />
-      <RmsCard rms={s?.input_rms ?? null} silence={s?.silence_threshold ?? null} identify={s?.identify_threshold ?? null} />
+      <RmsCard rms={rms} silence={s?.silence_threshold ?? null} identify={s?.identify_threshold ?? null} />
     </div>
   )
 }

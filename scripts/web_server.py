@@ -675,6 +675,31 @@ def api_trigger():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/rms/stream")
+def api_rms_stream():
+    def generate():
+        last = None
+        while True:
+            try:
+                p = Path(RMS_FILE)
+                if p.exists() and (time.time() - p.stat().st_mtime) < 5:
+                    val = p.read_text().strip()
+                    if val != last:
+                        last = val
+                        yield f"data: {val}\n\n"
+                elif last is not None:
+                    last = None
+                    yield "data: null\n\n"
+            except OSError:
+                pass
+            time.sleep(0.2)
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @app.route("/api/tracker-status")
 def api_tracker_status():
     try:
