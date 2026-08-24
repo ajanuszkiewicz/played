@@ -108,7 +108,7 @@ export function Recommendations({ currentSong }: Props) {
           )}
         </div>
         <button
-          onClick={() => load(true, customPrompt)}
+          onClick={() => { setCustomPrompt(''); setPromptDimmed(false); load(true) }}
           disabled={loading}
           title="Refresh recommendations"
           className="p-1.5 text-gray-600 hover:text-gray-400 transition-colors disabled:opacity-30"
