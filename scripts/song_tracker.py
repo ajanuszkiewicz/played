@@ -7,6 +7,7 @@ Captures audio from ALSA input, identifies songs via ShazamIO
 
 import argparse
 import audioop
+import collections
 import os
 import select
 import sys
@@ -401,6 +402,7 @@ def continuous_loop(conn: sqlite3.Connection) -> None:
     pcm_buffer       = bytearray()
     silence_count    = 0
     _last_status_log = 0.0
+    _rms_window      = collections.deque(maxlen=25)  # 25 × 200ms = 5s rolling window
     last_song      = [None]   # list so the worker thread can mutate it
     last_song_lock = threading.Lock()
     identifying    = threading.Event()
@@ -453,8 +455,10 @@ def continuous_loop(conn: sqlite3.Connection) -> None:
             rms     = audioop.rms(chunk, 2)
             is_loud = rms >= SILENCE_THRESHOLD
 
+            _rms_window.append(rms)
+            avg_rms = int(sum(_rms_window) / len(_rms_window))
             try:
-                Path(RMS_FILE).write_text(str(rms))
+                Path(RMS_FILE).write_text(str(avg_rms))
             except OSError:
                 pass
 
