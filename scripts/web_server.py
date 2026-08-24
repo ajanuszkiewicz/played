@@ -603,29 +603,36 @@ def api_recommendations():
     )
     time_str = now_dt.strftime(f"%A {hour12}:%M {ampm}")
 
-    weather     = _get_weather()
-    weather_ctx = ""
-    if weather:
-        city_part   = f" in {weather['city']}" if weather.get("city") else ""
-        weather_ctx = f"\n- Weather{city_part}: {weather['temp_c']}°C, {weather['condition']}"
-
     if custom_prompt:
-        playing_ctx = f"\n\nThe user is asking: \"{custom_prompt}\"."
-        if current_artist and current_album:
-            playing_ctx += f" They are currently listening to {current_artist} — {current_album}."
-        playing_ctx += " Suggest exactly 4 albums from the list that best answer their request, also considering the time, season, and weather."
-    elif current_artist and current_album:
-        playing_ctx = f"\n\nThe user is currently listening to {current_artist} — {current_album}. Suggest 4 albums from the list that would make a great follow-on listen, considering the mood and feel of that album alongside the time, season, and weather."
-    else:
-        playing_ctx = "\n\nRecommend exactly 4 albums from the list above that best suit this specific moment."
+        currently = f" They are currently listening to {current_artist} — {current_album}." if (current_artist and current_album) else ""
+        prompt = f"""You are a music recommendation assistant helping someone decide what to play from their vinyl/music collection.
 
-    prompt = f"""You are a music recommendation assistant helping someone decide what to play from their vinyl/music collection.
+Records from their collection:
+{collection}
+
+The user is asking: "{custom_prompt}."{currently} Suggest exactly 4 albums from the list that best answer their request. Only recommend albums explicitly listed above.
+
+Respond with JSON only, no markdown fences, no explanation outside the JSON:
+{{"mood": "2-5 word mood phrase", "recommendations": [{{"artist": "...", "album": "...", "reason": "one vivid sentence on why this fits"}}]}}"""
+    else:
+        if current_artist and current_album:
+            playing_ctx = f"\n\nThe user is currently listening to {current_artist} — {current_album}. Suggest 4 albums from the list that would make a great follow-on listen, considering the mood and feel of that album alongside the time, season, and weather."
+        else:
+            playing_ctx = "\n\nRecommend exactly 4 albums from the list above that best suit this specific moment."
+
+        weather     = _get_weather()
+        weather_ctx = ""
+        if weather:
+            city_part   = f" in {weather['city']}" if weather.get("city") else ""
+            weather_ctx = f"\n- Weather{city_part}: {weather['temp_c']}°C, {weather['condition']}"
+
+        prompt = f"""You are a music recommendation assistant helping someone decide what to play from their vinyl/music collection.
 
 Current context:
 - Time: {time_str} ({time_of_day})
 - Season: {season}{weather_ctx}
 
-A sample of records from their collection:
+Records from their collection:
 {collection}{playing_ctx} Let the time of day, season, and weather genuinely shape your choices. Only recommend albums explicitly listed above.
 
 IMPORTANT: In each reason, do NOT mention the city, weather, temperature, or specific weather conditions. Write about mood, feel, and musical qualities only.
