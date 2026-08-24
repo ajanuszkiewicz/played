@@ -88,6 +88,11 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    if (!ratingPatch) return
+    setStats(s => s ? { ...s, recent: s.recent.map(r => r.id === ratingPatch.id ? { ...r, rating: ratingPatch.rating } : r) } : s)
+  }, [ratingPatch])
+
+  useEffect(() => {
     if (demo) return
     fetchStats()
     fetchSystem()
