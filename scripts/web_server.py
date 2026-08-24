@@ -27,8 +27,11 @@ DB_PATH       = os.getenv("DB_PATH", "/var/lib/song-tracker/songs.db")
 HOST          = os.getenv("WEB_HOST", "0.0.0.0")
 PORT          = int(os.getenv("WEB_PORT", "8080"))
 AUDIO_FIFO    = os.getenv("AUDIO_FIFO", "/var/lib/song-tracker/audio.fifo")
-TRIGGER_FILE     = os.getenv("TRIGGER_FILE", "/var/lib/song-tracker/manual_trigger")
-STATUS_FILE      = os.getenv("STATUS_FILE",  "/var/lib/song-tracker/tracker_status")
+TRIGGER_FILE        = os.getenv("TRIGGER_FILE",  "/var/lib/song-tracker/manual_trigger")
+STATUS_FILE         = os.getenv("STATUS_FILE",   "/var/lib/song-tracker/tracker_status")
+RMS_FILE            = os.getenv("RMS_FILE",      "/var/lib/song-tracker/rms")
+SILENCE_THRESHOLD   = int(os.getenv("SILENCE_THRESHOLD",  "500"))
+IDENTIFY_THRESHOLD  = int(os.getenv("IDENTIFY_THRESHOLD", "1000"))
 DISCOGS_TOKEN     = os.getenv("DISCOGS_TOKEN", "")
 DISCOGS_USERNAME  = os.getenv("DISCOGS_USERNAME", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
@@ -743,6 +746,17 @@ def api_system():
         stats["disk_percent"]  = round(used_kb / total_kb * 100, 1) if total_kb else 0
     except Exception:
         stats["disk_used_gb"] = stats["disk_total_gb"] = stats["disk_percent"] = None
+
+    try:
+        p = Path(RMS_FILE)
+        if p.exists() and (time.time() - p.stat().st_mtime) < 10:
+            stats["input_rms"] = int(p.read_text().strip())
+        else:
+            stats["input_rms"] = None
+    except Exception:
+        stats["input_rms"] = None
+    stats["silence_threshold"]  = SILENCE_THRESHOLD
+    stats["identify_threshold"] = IDENTIFY_THRESHOLD
 
     return jsonify(stats)
 

@@ -39,6 +39,9 @@ export interface SysStats {
   disk_total_gb: number | null
   disk_percent: number | null
   shazam_calls_per_hour: number | null
+  input_rms: number | null
+  silence_threshold: number | null
+  identify_threshold: number | null
 }
 
 export interface ArtistSummary {

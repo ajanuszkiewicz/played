@@ -1,5 +1,7 @@
-import { Cpu, MemoryStick, Thermometer, HardDrive, Fingerprint } from 'lucide-react'
+import { Cpu, MemoryStick, Thermometer, HardDrive, Fingerprint, AudioLines } from 'lucide-react'
 import type { SysStats } from '../types'
+
+const RMS_MAX = 8000
 
 interface Props {
   stats: SysStats | null
@@ -34,9 +36,34 @@ function StatCard({ label, value, sub, percent, icon, color }: CardProps) {
   )
 }
 
+function RmsCard({ rms, silence, identify }: { rms: number | null; silence: number | null; identify: number | null }) {
+  const silPct  = Math.min(((silence  ?? 500)  / RMS_MAX) * 100, 100)
+  const idPct   = Math.min(((identify ?? 1000) / RMS_MAX) * 100, 100)
+  const rmsPct  = Math.min(((rms      ?? 0)    / RMS_MAX) * 100, 100)
+  const barColor = rms == null ? 'bg-gray-600'
+    : rms >= (identify ?? 1000) ? 'bg-emerald-500'
+    : rms >= (silence  ?? 500)  ? 'bg-amber-500'
+    : 'bg-gray-600'
+  return (
+    <div className="bg-gray-800/50 backdrop-blur-sm border border-gray-700/50 rounded-2xl p-5">
+      <div className="flex items-center gap-3 mb-3">
+        <div className="p-2 bg-gray-700/50 rounded-lg"><AudioLines size={18} className="text-violet-400" /></div>
+        <p className="text-gray-400 text-sm">Input RMS</p>
+      </div>
+      <p className="text-2xl text-white mb-1">{rms != null ? rms : '—'}</p>
+      <p className="text-xs text-gray-500 mb-3">silence {silence ?? 500} · identify {identify ?? 1000}</p>
+      <div className="relative h-1 bg-gray-700/50 rounded-full overflow-hidden">
+        <div className={`h-full rounded-full transition-all duration-700 ${barColor}`} style={{ width: `${rmsPct}%` }} />
+        <div className="absolute top-0 h-full w-px bg-gray-500/70" style={{ left: `${silPct}%` }} />
+        <div className="absolute top-0 h-full w-px bg-gray-400/70" style={{ left: `${idPct}%` }} />
+      </div>
+    </div>
+  )
+}
+
 export function SystemStats({ stats: s }: Props) {
   return (
-    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
       <StatCard
         label="CPU"
         value={s?.cpu_percent != null ? `${s.cpu_percent}%` : null}
@@ -77,6 +104,7 @@ export function SystemStats({ stats: s }: Props) {
         icon={<Fingerprint size={18} className="text-sky-400" />}
         color="bg-sky-500"
       />
+      <RmsCard rms={s?.input_rms ?? null} silence={s?.silence_threshold ?? null} identify={s?.identify_threshold ?? null} />
     </div>
   )
 }

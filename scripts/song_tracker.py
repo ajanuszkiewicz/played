@@ -40,6 +40,7 @@ RETRY_INTERVAL      = int(os.getenv("RETRY_INTERVAL", "30"))
 MONITOR_MODE      = os.getenv("MONITOR_MODE", "continuous")
 TRIGGER_FILE      = os.getenv("TRIGGER_FILE", "/var/lib/song-tracker/manual_trigger")
 STATUS_FILE       = os.getenv("STATUS_FILE",  "/var/lib/song-tracker/tracker_status")
+RMS_FILE          = os.getenv("RMS_FILE",     "/var/lib/song-tracker/rms")
 LOG_LEVEL         = os.getenv("LOG_LEVEL", "INFO")
 
 # ── CLI args (override env vars) ───────────────────────────────────────────────
@@ -400,6 +401,7 @@ def continuous_loop(conn: sqlite3.Connection) -> None:
     pcm_buffer       = bytearray()
     silence_count    = 0
     _last_status_log = 0.0
+    _last_rms_write  = 0.0
     last_song      = [None]   # list so the worker thread can mutate it
     last_song_lock = threading.Lock()
     identifying    = threading.Event()
@@ -452,6 +454,14 @@ def continuous_loop(conn: sqlite3.Connection) -> None:
             rms     = audioop.rms(chunk, 2)
             is_loud = rms >= SILENCE_THRESHOLD
 
+            now = time.time()
+            if now - _last_rms_write >= 1.0:
+                try:
+                    Path(RMS_FILE).write_text(str(rms))
+                except OSError:
+                    pass
+                _last_rms_write = now
+
             # Manual trigger — force a fresh identification, overriding any cooldown
             if Path(TRIGGER_FILE).exists():
                 try:
@@ -465,9 +475,7 @@ def continuous_loop(conn: sqlite3.Connection) -> None:
                 _set_status("recording")
                 pcm_buffer = bytearray(chunk)
                 silence_count = 0
-                _last_status_log = time.time()
-
-            now = time.time()
+                _last_status_log = now
 
             if state == "WAITING":
                 if is_loud:
