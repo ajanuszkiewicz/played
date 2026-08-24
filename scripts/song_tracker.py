@@ -348,7 +348,7 @@ def _identify_worker(
         retry_after[0] = time.time() + RETRY_INTERVAL
     finally:
         Path(tmp.name).unlink(missing_ok=True)
-        # done_event stays set until retry_after elapses or silence resets it
+        _set_status("")   # Shazam call is complete; clear status regardless of outcome
 
 
 # ── Main Loops ─────────────────────────────────────────────────────────────────
