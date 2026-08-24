@@ -565,7 +565,8 @@ def api_recommendations():
     custom_prompt  = request.args.get("custom_prompt",  "").strip()
     force          = request.args.get("refresh") == "1"
     now_ts         = time.time()
-    cache_key      = f"{current_artist}::{current_album}::{custom_prompt}" if (current_artist or custom_prompt) else "__none__"
+    hour_bucket    = datetime.now().strftime("%Y-%m-%d-%H")
+    cache_key      = f"{current_artist}::{current_album}::{custom_prompt}::{hour_bucket}" if (current_artist or custom_prompt) else f"__none__::{hour_bucket}"
 
     if not force and cache_key in _rec_cache:
         cached = _rec_cache[cache_key]
