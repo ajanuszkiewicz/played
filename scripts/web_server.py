@@ -624,6 +624,8 @@ Current context:
 A sample of records from their collection:
 {collection}{playing_ctx} Let the time of day, season, and weather genuinely shape your choices. Only recommend albums explicitly listed above.
 
+IMPORTANT: In each reason, do NOT mention the city, weather, temperature, or specific weather conditions. Write about mood, feel, and musical qualities only.
+
 Respond with JSON only, no markdown fences, no explanation outside the JSON:
 {{"mood": "2-5 word mood phrase", "recommendations": [{{"artist": "...", "album": "...", "reason": "one vivid sentence on why this fits right now"}}]}}"""
 
