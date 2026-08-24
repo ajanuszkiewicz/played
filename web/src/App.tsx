@@ -30,7 +30,9 @@ export default function App() {
 
   const [stats, setStats] = useState<StatsData | null>(null)
   const [sysStats, setSysStats] = useState<SysStats | null>(null)
-  const [triggerState, setTriggerState] = useState<'idle' | 'loading' | 'done'>('idle')
+  const [triggerState, setTriggerState] = useState<'idle' | 'active' | 'done'>('idle')
+  const [trackerPhase, setTrackerPhase] = useState<'recording' | 'identifying' | null>(null)
+  const trackerPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [ratingPatch, setRatingPatch] = useState<{ id: number; rating: number | null } | null>(null)
   const [discogs, setDiscogs] = useState<{ owned: boolean | null; format?: string | null; url?: string | null } | null>(null)
   const [discogsStatus, setDiscogsStatus] = useState<{ configured: boolean; syncing: boolean; last_sync: string | null; count: number } | null>(null)
@@ -52,16 +54,30 @@ export default function App() {
 
   const triggerIdentify = useCallback(async () => {
     if (triggerState !== 'idle') return
-    setTriggerState('loading')
+    setTriggerState('active')
+    setTrackerPhase(null)
     try {
       await fetch('/api/trigger', { method: 'POST' })
-      setTriggerState('done')
-      // Refresh stats after SAMPLE_DURATION + a bit to pick up any new song
-      setTimeout(fetchStats, 15_000)
     } catch {
       setTriggerState('idle')
+      return
     }
-    setTimeout(() => setTriggerState('idle'), 3_000)
+    // Poll tracker phase until it goes idle, then show Done briefly
+    if (trackerPollRef.current) clearInterval(trackerPollRef.current)
+    trackerPollRef.current = setInterval(async () => {
+      try {
+        const r = await fetch('/api/tracker-status')
+        const { phase } = await r.json()
+        setTrackerPhase(phase)
+        if (!phase) {
+          clearInterval(trackerPollRef.current!)
+          trackerPollRef.current = null
+          setTriggerState('done')
+          fetchStats()
+          setTimeout(() => setTriggerState('idle'), 2_000)
+        }
+      } catch { /* non-fatal */ }
+    }, 1_000)
   }, [triggerState, fetchStats])
 
   const fetchDiscogsStatus = useCallback(async () => {
@@ -140,8 +156,14 @@ export default function App() {
                   : 'border-gray-700/50 bg-gray-800/50 text-gray-300 hover:border-blue-500/50 hover:text-blue-400 disabled:opacity-50 disabled:cursor-default'
                 }`}
             >
-              <Zap size={16} className={triggerState === 'loading' ? 'animate-pulse' : ''} />
-              <span>{triggerState === 'done' ? 'Scanning…' : 'Identify Now'}</span>
+              <Zap size={16} className={triggerState === 'active' ? 'animate-pulse' : ''} />
+              <span>
+                {triggerState === 'done' ? 'Done'
+                  : trackerPhase === 'recording' ? 'Recording…'
+                  : trackerPhase === 'identifying' ? 'Asking Shazam…'
+                  : triggerState === 'active' ? 'Starting…'
+                  : 'Identify Now'}
+              </span>
             </button>
             {/* <ListenButton /> */}
           </div>

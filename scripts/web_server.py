@@ -28,6 +28,7 @@ HOST          = os.getenv("WEB_HOST", "0.0.0.0")
 PORT          = int(os.getenv("WEB_PORT", "8080"))
 AUDIO_FIFO    = os.getenv("AUDIO_FIFO", "/var/lib/song-tracker/audio.fifo")
 TRIGGER_FILE     = os.getenv("TRIGGER_FILE", "/var/lib/song-tracker/manual_trigger")
+STATUS_FILE      = os.getenv("STATUS_FILE",  "/var/lib/song-tracker/tracker_status")
 DISCOGS_TOKEN     = os.getenv("DISCOGS_TOKEN", "")
 DISCOGS_USERNAME  = os.getenv("DISCOGS_USERNAME", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
@@ -669,6 +670,17 @@ def api_trigger():
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/tracker-status")
+def api_tracker_status():
+    try:
+        p = Path(STATUS_FILE)
+        if p.exists() and (time.time() - p.stat().st_mtime) < 120:
+            return jsonify({"phase": p.read_text().strip() or None})
+    except OSError:
+        pass
+    return jsonify({"phase": None})
 
 
 @app.route("/api/songs/<int:song_id>")

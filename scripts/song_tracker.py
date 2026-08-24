@@ -39,6 +39,7 @@ SILENCE_DURATION    = int(os.getenv("SILENCE_DURATION", "2"))
 RETRY_INTERVAL      = int(os.getenv("RETRY_INTERVAL", "30"))
 MONITOR_MODE      = os.getenv("MONITOR_MODE", "continuous")
 TRIGGER_FILE      = os.getenv("TRIGGER_FILE", "/var/lib/song-tracker/manual_trigger")
+STATUS_FILE       = os.getenv("STATUS_FILE",  "/var/lib/song-tracker/tracker_status")
 LOG_LEVEL         = os.getenv("LOG_LEVEL", "INFO")
 
 # ── CLI args (override env vars) ───────────────────────────────────────────────
@@ -81,6 +82,15 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 running = True
+
+def _set_status(phase: str) -> None:
+    try:
+        if phase:
+            Path(STATUS_FILE).write_text(phase)
+        else:
+            Path(STATUS_FILE).unlink(missing_ok=True)
+    except OSError:
+        pass
 
 def handle_signal(sig, frame):
     global running
@@ -452,6 +462,7 @@ def continuous_loop(conn: sqlite3.Connection) -> None:
                 identifying.clear()
                 retry_after[0] = None
                 state = "BUFFERING"
+                _set_status("recording")
                 pcm_buffer = bytearray(chunk)
                 silence_count = 0
                 _last_status_log = time.time()
@@ -463,6 +474,7 @@ def continuous_loop(conn: sqlite3.Connection) -> None:
                     pcm_buffer = bytearray(chunk)
                     state = "BUFFERING"
                     _last_status_log = now
+                    _set_status("recording")
                     log.debug("[WAITING→BUFFERING] Audio detected (RMS %d), buffering...", rms)
                 elif now - _last_status_log >= 10:
                     log.debug("[WAITING] Silence (RMS %d, threshold %d)", rms, SILENCE_THRESHOLD)
@@ -480,6 +492,7 @@ def continuous_loop(conn: sqlite3.Connection) -> None:
                             buf_rms, IDENTIFY_THRESHOLD,
                         )
                         state = "WAITING"
+                        _set_status("")
                         pcm_buffer.clear()
                         silence_count = 0
                         _last_status_log = now
@@ -496,6 +509,7 @@ def continuous_loop(conn: sqlite3.Connection) -> None:
                             buf_rms, buffered_s,
                         )
                         state = "COOLDOWN"
+                        _set_status("identifying")
                         silence_count = 0
                         _last_status_log = now
                     else:
@@ -508,6 +522,7 @@ def continuous_loop(conn: sqlite3.Connection) -> None:
                     if silence_count >= BUFFER_CHUNKS_NEEDED:
                         log.debug("[BUFFERING→WAITING] Audio dropped — %.1fs buffered, resetting.", buffered_s)
                         state = "WAITING"
+                        _set_status("")
                         pcm_buffer.clear()
                         silence_count = 0
                         _last_status_log = now
@@ -525,6 +540,7 @@ def continuous_loop(conn: sqlite3.Connection) -> None:
                     retry_after[0] = None
                     identifying.clear()
                     state = "WAITING"
+                    _set_status("")
                     silence_count = 0
                     pcm_buffer.clear()
                     _last_status_log = now
@@ -535,6 +551,7 @@ def continuous_loop(conn: sqlite3.Connection) -> None:
                         retry_after[0] = None
                         identifying.clear()
                         state = "WAITING"
+                        _set_status("")
                         silence_count = 0
                         pcm_buffer.clear()
                         _last_status_log = now
