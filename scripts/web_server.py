@@ -575,7 +575,7 @@ def api_recommendations():
     db = get_db()
     try:
         rows = db.execute(
-            "SELECT artist, title FROM discogs_collection ORDER BY RANDOM() LIMIT 50"
+            "SELECT artist, title FROM discogs_collection ORDER BY artist"
         ).fetchall()
     except Exception:
         rows = []
