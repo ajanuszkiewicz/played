@@ -107,7 +107,7 @@ export default function App() {
   const isActive = recent ? (Date.now() - toUTC(recent.played_at)) < 10 * 60_000 : false
   const currentSong = demo ? DEMO_SONG
     : isActive && recent
-    ? { id: recent.id, artist: recent.artist, title: recent.title, album: recent.album, albumArt: recent.cover_art ?? undefined, rating: recent.rating }
+    ? { id: recent.id, artist: recent.artist, title: recent.title, album: recent.album, albumArt: recent.cover_art ?? undefined, rating: recent.rating, isPinned: recent.is_pinned }
     : null
   const lastSong = !isActive && recent
     ? { artist: recent.artist, title: recent.title, playedAt: recent.played_at }
@@ -177,7 +177,7 @@ export default function App() {
         {/* Currently playing + recent songs */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
           <div className="lg:col-span-1">
-            <CurrentlyPlaying song={currentSong} lastSong={lastSong} onRate={(id, rating) => setRatingPatch({ id, rating })} discogs={discogs} discogsStatus={demo ? { configured: true, syncing: false, last_sync: new Date().toISOString(), count: 842 } : discogsStatus} onDiscogsSync={handleDiscogsSync} />
+            <CurrentlyPlaying song={currentSong} lastSong={lastSong} onRate={(id, rating) => setRatingPatch({ id, rating })} discogs={discogs} discogsStatus={demo ? { configured: true, syncing: false, last_sync: new Date().toISOString(), count: 842 } : discogsStatus} onDiscogsSync={handleDiscogsSync} onArtworkChange={fetchStats} />
           </div>
           <div className="lg:col-span-2">
             <LastPlayedSongs latestId={stats?.recent[0]?.id ?? null} ratingPatch={ratingPatch} />

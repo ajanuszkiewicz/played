@@ -123,6 +123,43 @@ def _plain_db() -> sqlite3.Connection:
     return conn
 
 
+def _ensure_pin_table(db: sqlite3.Connection) -> None:
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS album_art_pins (
+            artist    TEXT NOT NULL,
+            album     TEXT NOT NULL,
+            cover_art TEXT NOT NULL,
+            pinned_at TEXT NOT NULL,
+            PRIMARY KEY (artist, album)
+        )
+    """)
+    db.commit()
+
+
+def _apply_pins(rows: list[dict], db: sqlite3.Connection) -> list[dict]:
+    """Replace cover_art with pinned URL and add is_pinned flag for matching rows."""
+    pairs = [(r["artist"], r["album"]) for r in rows if r.get("album")]
+    if not pairs:
+        return [{**r, "is_pinned": False} for r in rows]
+    placeholders = ",".join(["(?,?)"] * len(pairs))
+    flat = [v for pair in pairs for v in pair]
+    pinned = {
+        (p["artist"], p["album"]): p["cover_art"]
+        for p in db.execute(
+            f"SELECT artist, album, cover_art FROM album_art_pins WHERE (artist, album) IN ({placeholders})",
+            flat,
+        ).fetchall()
+    }
+    result = []
+    for r in rows:
+        key = (r["artist"], r.get("album"))
+        if key[1] and key in pinned:
+            result.append({**r, "cover_art": pinned[key], "is_pinned": True})
+        else:
+            result.append({**r, "is_pinned": False})
+    return result
+
+
 def _ensure_discogs_tables(conn: sqlite3.Connection) -> None:
     conn.execute("""
         CREATE TABLE IF NOT EXISTS discogs_collection (
@@ -326,11 +363,13 @@ def api_songs():
         params + [limit, offset],
     ).fetchall()
 
+    _ensure_pin_table(db)
+    songs = _apply_pins([dict(r) for r in rows], db)
     return jsonify({
         "total": total,
         "page": page,
         "limit": limit,
-        "songs": [dict(r) for r in rows],
+        "songs": songs,
     })
 
 
@@ -368,12 +407,14 @@ def api_stats():
         GROUP BY hour ORDER BY hour
     """, (since_24h,)).fetchall()
 
+    _ensure_pin_table(db)
+    recent_list = _apply_pins([dict(r) for r in recent], db)
     return jsonify({
         "total_songs": total,
         "today_count": today_count,
         "top_artists": [dict(r) for r in top_artists],
         "top_songs":   [dict(r) for r in top_songs],
-        "recent":      [dict(r) for r in recent],
+        "recent":      recent_list,
         "hourly_24h":  [dict(r) for r in hourly],
     })
 
@@ -446,6 +487,37 @@ def api_artist_delete():
         return jsonify({"error": "name required"}), 400
     db = get_db()
     db.execute("DELETE FROM songs WHERE artist = ?", (artist,))
+    db.commit()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/artwork/pin", methods=["POST"])
+def api_artwork_pin():
+    db   = get_db()
+    data = request.get_json(silent=True) or {}
+    artist    = (data.get("artist") or "").strip()
+    album     = (data.get("album") or "").strip()
+    cover_art = (data.get("cover_art") or "").strip()
+    if not artist or not album or not cover_art:
+        return jsonify({"error": "artist, album, and cover_art required"}), 400
+    _ensure_pin_table(db)
+    db.execute(
+        "INSERT OR REPLACE INTO album_art_pins (artist, album, cover_art, pinned_at) VALUES (?,?,?,?)",
+        (artist, album, cover_art, datetime.utcnow().isoformat(timespec="seconds") + "Z"),
+    )
+    db.commit()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/artwork/pin", methods=["DELETE"])
+def api_artwork_unpin():
+    db     = get_db()
+    artist = request.args.get("artist", "").strip()
+    album  = request.args.get("album", "").strip()
+    if not artist or not album:
+        return jsonify({"error": "artist and album required"}), 400
+    _ensure_pin_table(db)
+    db.execute("DELETE FROM album_art_pins WHERE artist=? AND album=?", (artist, album))
     db.commit()
     return jsonify({"ok": True})
 

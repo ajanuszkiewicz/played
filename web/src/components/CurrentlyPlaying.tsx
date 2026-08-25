@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Music, Disc3, RefreshCw, ScrollText, X } from 'lucide-react'
+import { Music, Disc3, RefreshCw, ScrollText, X, Pin, PinOff } from 'lucide-react'
 import { toUTC } from '../App'
 import { StarRating } from './StarRating'
 
@@ -10,6 +10,7 @@ interface Song {
   album: string | null
   albumArt?: string
   rating: number | null
+  isPinned?: boolean
 }
 
 interface LastSong {
@@ -32,6 +33,7 @@ interface Props {
   discogs?: { owned: boolean | null; format?: string | null; url?: string | null } | null
   discogsStatus?: DiscogsStatus | null
   onDiscogsSync?: () => void
+  onArtworkChange?: () => void
 }
 
 type LyricsState = { found: boolean; instrumental: boolean; plainLyrics?: string | null }
@@ -53,16 +55,37 @@ function syncedAgo(iso: string): string {
   return `${Math.floor(diff / 86400)}d ago`
 }
 
-export function CurrentlyPlaying({ song, lastSong, onRate, discogs, discogsStatus, onDiscogsSync }: Props) {
+export function CurrentlyPlaying({ song, lastSong, onRate, discogs, discogsStatus, onDiscogsSync, onArtworkChange }: Props) {
   const [lyricsOpen, setLyricsOpen] = useState(false)
   const [lyrics, setLyrics] = useState<LyricsState | null>(null)
   const [lyricsLoading, setLyricsLoading] = useState(false)
+  const [pinning, setPinning] = useState(false)
 
   // Reset when song changes
   useEffect(() => {
     setLyricsOpen(false)
     setLyrics(null)
   }, [song?.id])
+
+  const togglePin = async () => {
+    if (!song?.album || !song.albumArt || pinning) return
+    setPinning(true)
+    try {
+      if (song.isPinned) {
+        const params = new URLSearchParams({ artist: song.artist, album: song.album })
+        await fetch('/api/artwork/pin?' + params, { method: 'DELETE' })
+      } else {
+        await fetch('/api/artwork/pin', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ artist: song.artist, album: song.album, cover_art: song.albumArt }),
+        })
+      }
+      onArtworkChange?.()
+    } finally {
+      setPinning(false)
+    }
+  }
 
   const openLyrics = async () => {
     setLyricsOpen(true)
@@ -108,11 +131,25 @@ export function CurrentlyPlaying({ song, lastSong, onRate, discogs, discogsStatu
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse inline-block" />
           Now Playing
         </p>
-        <div className="aspect-square bg-gradient-to-br from-gray-700 to-gray-800 rounded-xl mb-6 flex items-center justify-center overflow-hidden shadow-xl">
+        <div className="group relative aspect-square bg-gradient-to-br from-gray-700 to-gray-800 rounded-xl mb-6 flex items-center justify-center overflow-hidden shadow-xl">
           {song.albumArt ? (
             <img src={song.albumArt} alt={song.album ?? song.title} className="w-full h-full object-cover" />
           ) : (
             <Music className="text-gray-600" size={96} strokeWidth={1.5} />
+          )}
+          {song.album && song.albumArt && (
+            <button
+              onClick={togglePin}
+              disabled={pinning}
+              title={song.isPinned ? 'Unpin art' : 'Pin this art for album'}
+              className={`absolute bottom-2 right-2 p-1.5 rounded-lg transition-all disabled:opacity-50
+                ${song.isPinned
+                  ? 'bg-black/60 text-emerald-400 opacity-100'
+                  : 'bg-black/50 text-gray-300 opacity-0 group-hover:opacity-100 hover:text-white'
+                }`}
+            >
+              {song.isPinned ? <PinOff size={13} /> : <Pin size={13} />}
+            </button>
           )}
         </div>
         <div className="text-center space-y-2">

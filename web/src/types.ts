@@ -5,6 +5,7 @@ export interface RecentSong {
   artist: string
   album: string | null
   cover_art: string | null
+  is_pinned: boolean
   rating: number | null
 }
 
