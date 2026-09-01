@@ -26,7 +26,7 @@ from datetime import datetime
 from pathlib import Path
 
 from shazamio import Shazam
-from discogs_utils import find_in_collection as _discogs_find, find_album_by_track as _discogs_find_by_track
+from discogs_utils import find_in_collection as _discogs_find, find_album_by_track as _discogs_find_by_track, normalize_track_title as _normalize_track_title
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 DB_PATH           = os.getenv("DB_PATH", "/var/lib/song-tracker/songs.db")
@@ -143,7 +143,14 @@ def init_db(path: str) -> sqlite3.Connection:
     return conn
 
 
-def record_song(conn: sqlite3.Connection, track: dict, fingerprint: str) -> bool:
+def record_song(
+    conn: sqlite3.Connection,
+    track: dict,
+    fingerprint: str,
+    last_album: str | None = None,
+) -> str | None:
+    """Record an identified track. Returns the stored album name on a new
+    insert, None on a duplicate fingerprint or error."""
     now = datetime.utcnow().isoformat(timespec="seconds") + "Z"
 
     album, release_date = None, None
@@ -158,25 +165,52 @@ def record_song(conn: sqlite3.Connection, track: dict, fingerprint: str) -> bool
     artist     = track.get("subtitle", "Unknown")
     song_title = track.get("title", "Unknown")
 
-    # Use Discogs canonical naming if the album is in the collection
-    if album:
-        match = _discogs_find(conn, artist, album)
-        if match:
-            artist = match["artist"]
-            album  = match["title"]
-            log.debug("Discogs album match: %s — %s", artist, album)
+    # Album continuity: if the previous track was from last_album and this
+    # track's title appears in that album's tracklist, trust that over
+    # whatever Shazam says (Shazam often picks the wrong pressing/compilation).
+    if last_album:
+        continuity = _discogs_find_by_track(conn, artist, song_title, preferred_album=last_album)
+        if continuity and continuity["title"] == last_album:
+            artist = continuity["artist"]
+            album  = continuity["title"]
+            log.debug("Album continuity: %s — %s", artist, album)
+        else:
+            if album:
+                match = _discogs_find(conn, artist, album) or \
+                        _discogs_find_by_track(conn, artist, song_title)
+            else:
+                match = _discogs_find_by_track(conn, artist, song_title)
+            if match:
+                artist = match["artist"]
+                album  = match["title"]
+                log.debug("Discogs match: %s — %s", artist, album)
+    else:
+        if album:
+            match = _discogs_find(conn, artist, album)
+            if match:
+                artist = match["artist"]
+                album  = match["title"]
+                log.debug("Discogs album match: %s — %s", artist, album)
+            else:
+                match = _discogs_find_by_track(conn, artist, song_title)
+                if match:
+                    artist = match["artist"]
+                    album  = match["title"]
+                    log.debug("Discogs track match: %s — %s", artist, album)
         else:
             match = _discogs_find_by_track(conn, artist, song_title)
             if match:
                 artist = match["artist"]
                 album  = match["title"]
-                log.debug("Discogs track match: %s — %s", artist, album)
+                log.debug("Discogs track match (no album): %s — %s", artist, album)
+
+    # Prefer canonical Discogs track title; strip remaster suffixes as fallback.
+    track_match = _discogs_find_by_track(conn, artist, song_title)
+    if track_match and track_match.get("track_title"):
+        song_title = track_match["track_title"]
+        log.debug("Discogs track title: %s", song_title)
     else:
-        match = _discogs_find_by_track(conn, artist, song_title)
-        if match:
-            artist = match["artist"]
-            album  = match["title"]
-            log.debug("Discogs track match (no album): %s — %s", artist, album)
+        song_title = _normalize_track_title(song_title)
 
     try:
         conn.execute("""
@@ -186,7 +220,7 @@ def record_song(conn: sqlite3.Connection, track: dict, fingerprint: str) -> bool
             VALUES (?,?,?,?,?,?,?,?,?,?)
         """, (
             now,
-            track.get("title", "Unknown"),
+            song_title,
             artist,
             album,
             release_date,
@@ -198,13 +232,13 @@ def record_song(conn: sqlite3.Connection, track: dict, fingerprint: str) -> bool
         ))
         conn.commit()
         if conn.execute("SELECT changes()").fetchone()[0]:
-            log.info("Recorded: %s — %s", artist, track.get("title"))
-            return True
+            log.info("Recorded: %s — %s", artist, song_title)
+            return album
         log.debug("Duplicate fingerprint, skipping.")
-        return False
+        return None
     except sqlite3.Error as e:
         log.error("DB error: %s", e)
-        return False
+        return None
 
 
 # ── Audio Capture ──────────────────────────────────────────────────────────────
@@ -318,6 +352,7 @@ def _identify_worker(
     last_song: list,
     last_song_lock: threading.Lock,
     retry_after: list,
+    last_album: list,
 ) -> None:
     """Background thread: write PCM to WAV, identify via Shazam, record result."""
     tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
@@ -338,8 +373,10 @@ def _identify_worker(
                 if current == last_song[0]:
                     log.debug("Consecutive duplicate (%s — %s), skipping.", current[1], current[0])
                 else:
-                    record_song(conn, result, fp)
+                    recorded_album = record_song(conn, result, fp, last_album=last_album[0])
                     last_song[0] = current
+                    if recorded_album is not None:
+                        last_album[0] = recorded_album
             retry_after[0] = None
             done_event.clear()
         else:
@@ -356,7 +393,8 @@ def _identify_worker(
 # ── Main Loops ─────────────────────────────────────────────────────────────────
 def interval_loop(conn: sqlite3.Connection) -> None:
     """Original fixed-interval poll loop."""
-    last_song: tuple[str, str] | None = None
+    last_song:  tuple[str, str] | None = None
+    last_album: str | None = None
 
     while running:
         log.debug("Capturing %d seconds of audio...", SAMPLE_DURATION)
@@ -378,8 +416,10 @@ def interval_loop(conn: sqlite3.Connection) -> None:
                     if current == last_song:
                         log.debug("Consecutive duplicate (%s — %s), skipping.", current[1], current[0])
                     else:
-                        record_song(conn, result, fp)
+                        recorded_album = record_song(conn, result, fp, last_album=last_album)
                         last_song = current
+                        if recorded_album is not None:
+                            last_album = recorded_album
                 else:
                     log.debug("Song not identified.")
         finally:
@@ -404,6 +444,7 @@ def continuous_loop(conn: sqlite3.Connection) -> None:
     _last_status_log = 0.0
     _rms_window      = collections.deque(maxlen=25)  # 25 × 200ms = 5s rolling window
     last_song      = [None]   # list so the worker thread can mutate it
+    last_album     = [None]   # album of last recorded song, for continuity
     last_song_lock = threading.Lock()
     identifying    = threading.Event()
     retry_after    = [None]   # time.time() deadline set by worker on failure
@@ -511,7 +552,7 @@ def continuous_loop(conn: sqlite3.Connection) -> None:
                         snapshot = bytes(pcm_buffer)
                         threading.Thread(
                             target=_identify_worker,
-                            args=(conn, snapshot, identifying, last_song, last_song_lock, retry_after),
+                            args=(conn, snapshot, identifying, last_song, last_song_lock, retry_after, last_album),
                             daemon=True,
                         ).start()
                         log.debug(
